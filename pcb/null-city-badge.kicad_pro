@@ -37,8 +37,8 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.0,
-          "height": 1.4,
+          "drill": 1.0,
+          "height": 1.7,
           "width": 1.7
         },
         "silk_line_width": 0.1,
@@ -125,21 +125,21 @@
         "max_error": 0.005,
         "min_clearance": 0.0,
         "min_connection": 0.0,
-        "min_copper_edge_clearance": 0.25,
+        "min_copper_edge_clearance": 0.15,
         "min_groove_width": 0.0,
-        "min_hole_clearance": 0.25,
-        "min_hole_to_hole": 0.25,
+        "min_hole_clearance": 0.2,
+        "min_hole_to_hole": 0.2,
         "min_microvia_diameter": 0.2,
         "min_microvia_drill": 0.1,
         "min_resolved_spokes": 2,
         "min_silk_clearance": 0.0,
-        "min_text_height": 0.8,
+        "min_text_height": 0.7,
         "min_text_thickness": 0.08,
         "min_through_hole_diameter": 0.3,
         "min_track_width": 0.0,
         "min_via_annular_width": 0.1,
         "min_via_diameter": 0.5,
-        "solder_mask_to_copper_clearance": 0.0,
+        "solder_mask_to_copper_clearance": 0.005,
         "use_height_for_length_calcs": true
       },
       "teardrop_options": [
@@ -468,7 +468,6 @@
       "single_global_label": "ignore",
       "unannotated": "error",
       "unconnected_wire_endpoint": "warning",
-      "undefined_netclass": "error",
       "unit_value_mismatch": "error",
       "unresolved_variable": "error",
       "wire_dangling": "error"
@@ -479,7 +478,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "null-city-badge.kicad_pro",
+    "filename": "lanyard.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -515,10 +514,10 @@
       "gencad": "",
       "idf": "",
       "netlist": "",
-      "plot": "",
-      "pos_files": "",
+      "plot": "gerber/",
+      "pos_files": "./",
       "specctra_dsn": "",
-      "step": "",
+      "step": "lanyard.step",
       "svg": "",
       "vrml": ""
     },
@@ -641,6 +640,22 @@
     [
       "96a9ebd7-4f87-4060-87a7-f00d27473ddc",
       "Root"
+    ],
+    [
+      "e4e3d2e8-6b1b-4202-aeb1-194a9c4f5f47",
+      "SD CARD MODULE"
+    ],
+    [
+      "8b66e526-c179-4bda-9ed5-284c54d75577",
+      "LORA MODULE"
+    ],
+    [
+      "8c5168c8-f359-473b-9459-5b246b7098e5",
+      "SOUND MODULE"
+    ],
+    [
+      "1c85135a-c5d6-47ce-b7ac-c98d1b1d7c0d",
+      "CC1101 MODULE"
     ]
   ],
   "text_variables": {}
