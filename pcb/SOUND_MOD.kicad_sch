@@ -2035,6 +2035,16 @@
 	)
 	(wire
 		(pts
+			(xy 175.26 57.15) (xy 175.26 62.23)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f2e0fdaa-2121-4b16-8344-75bdde781283")
+	)
+	(wire
+		(pts
 			(xy 124.46 58.42) (xy 118.11 58.42)
 		)
 		(stroke
@@ -2304,6 +2314,76 @@
 			(project "lanyard"
 				(path "/96a9ebd7-4f87-4060-87a7-f00d27473ddc/8c5168c8-f359-473b-9459-5b246b7098e5"
 					(reference "#PWR065")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:C")
+		(at 175.26 53.34 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "11aecbc7-d7a8-4060-ae8a-8a4831ea1308")
+		(property "Reference" "C31"
+			(at 179.07 52.0699 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "22U"
+			(at 179.07 54.6099 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0402_1005Metric"
+			(at 176.2252 57.15 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 175.26 53.34 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Unpolarized capacitor"
+			(at 175.26 53.34 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "c77a30a3-7f8d-4da0-8bc2-c25176b2bc4a")
+		)
+		(pin "1"
+			(uuid "8031d984-c5ef-4653-9775-d85c487286bf")
+		)
+		(instances
+			(project "null-city-badge"
+				(path "/96a9ebd7-4f87-4060-87a7-f00d27473ddc/8c5168c8-f359-473b-9459-5b246b7098e5"
+					(reference "C31")
 					(unit 1)
 				)
 			)
@@ -3067,7 +3147,7 @@
 	)
 	(symbol
 		(lib_id "Connector:TestPoint")
-		(at 175.26 62.23 0)
+		(at 175.26 49.53 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -3076,7 +3156,7 @@
 		(fields_autoplaced yes)
 		(uuid "79d1bfa0-5f3e-40fb-9a3c-096a01741f07")
 		(property "Reference" "TP1"
-			(at 177.8 57.6579 0)
+			(at 177.8 44.9579 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3085,7 +3165,7 @@
 			)
 		)
 		(property "Value" "SP+"
-			(at 177.8 60.1979 0)
+			(at 177.8 47.4979 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3094,7 +3174,7 @@
 			)
 		)
 		(property "Footprint" "Connector_Pin:Pin_D1.3mm_L11.0mm"
-			(at 180.34 62.23 0)
+			(at 180.34 49.53 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3103,7 +3183,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 180.34 62.23 0)
+			(at 180.34 49.53 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3112,7 +3192,7 @@
 			)
 		)
 		(property "Description" "test point"
-			(at 175.26 62.23 0)
+			(at 175.26 49.53 0)
 			(effects
 				(font
 					(size 1.27 1.27)
