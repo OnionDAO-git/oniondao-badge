@@ -13,6 +13,9 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <mbedtls/sha256.h>
+
+#include <SparkFun_ATECCX08a_Arduino_Library.h>
 
 #include "badge_pins.h"
 
@@ -46,13 +49,20 @@ static uint8_t img_buf[IMG_SIZE];
 // ── ESPNow ────────────────────────────────────────────────────────────────────
 enum MsgType : uint8_t { MSG_BEACON, MSG_PING, MSG_PONG, MSG_TEXT };
 
+// Fields up to (but not including) pubkey are covered by the ECDSA signature
+static const size_t BEACON_SIGN_LEN = 1 + 16 + 6 + 4 + 32;  // type+name+mac+counter+text = 59 bytes
+
 struct BeaconMsg {
     MsgType  type;
     char     name[16];
     uint8_t  mac[6];
     uint32_t counter;
     char     text[32];
+    // --- signed boundary above ---
+    uint8_t  pubkey[64];  // sender's P-256 public key (all-zero = unsigned)
+    uint8_t  sig[64];     // ECDSA-P256 signature over first BEACON_SIGN_LEN bytes
 };
+// Total: 187 bytes — under 250-byte ESPNow hard limit
 
 struct PeerEntry {
     uint8_t  mac[6];
@@ -60,6 +70,9 @@ struct PeerEntry {
     int8_t   rssi;
     uint32_t last_seen;
     uint32_t first_seen;
+    bool     verified;      // ECDSA signature verified
+    bool     sig_present;   // peer sent a signature (false = old firmware)
+    uint8_t  pubkey[64];    // their P-256 public key
 };
 
 struct InboxEntry {
@@ -85,6 +98,17 @@ static int           g_espnow_tab   = 0;  // 0=BEACON 1=PEERS 2=INBOX 3=LOG
 static int           g_peers_cursor = 0;
 static int           g_inbox_cursor = 0;
 static int           g_log_cursor   = 0;
+
+// ATECC608B hardware crypto
+static ATECCX08A g_atecc;
+static bool      g_atecc_available = false;  // chip found at 0x60
+static bool      g_atecc_ok        = false;  // provisioned + pubkey cached
+static uint8_t   g_atecc_pubkey[PUBLIC_KEY_SIZE] = {};
+
+// Queued ECDSA verification (done in main loop, not in recv callback)
+static bool      g_needs_verify       = false;
+static BeaconMsg g_pending_verify     = {};
+static uint8_t   g_pending_ver_mac[6] = {};
 
 // Callsign editor
 static const char EDIT_CHARSET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
@@ -119,6 +143,8 @@ enum AppState {
     STATE_ESPNOW_EDIT,
     STATE_ESPNOW_TARGET,
     STATE_ESPNOW_MSG,
+    STATE_ATECC_INTRO,  // first-time identity setup — show intro, wait for SELECT
+    STATE_ATECC_DONE,   // provisioning complete — show result, any button → ESPNow
 };
 
 static AppState g_state        = STATE_MENU;
@@ -873,6 +899,110 @@ static void draw_guide() {
     display.hibernate();
 }
 
+// ── ATECC608B provisioning ────────────────────────────────────────────────────
+
+// Detect chip and load public key; sets g_atecc_available and g_atecc_ok.
+// If chip is found but not yet provisioned, returns false so caller can
+// route to STATE_ATECC_INTRO.
+static bool check_atecc() {
+    if (!g_atecc.begin(0x60, Wire, Serial)) return false;
+    g_atecc_available = true;
+    g_atecc.wakeUp();
+    g_atecc.readConfigZone(false);
+    bool config_ok = g_atecc.configLockStatus;
+    bool slot_ok   = g_atecc.slot0LockStatus;
+    if (config_ok && slot_ok) {
+        g_atecc.generatePublicKey(0, false);
+        memcpy(g_atecc_pubkey, g_atecc.publicKey64Bytes, PUBLIC_KEY_SIZE);
+        g_atecc.sleep();
+        g_atecc_ok = true;
+        Serial.println("[atecc] provisioned, public key loaded");
+        return true;
+    }
+    g_atecc.sleep();
+    Serial.printf("[atecc] needs provisioning (cfg=%d slot0=%d)\n", config_ok, slot_ok);
+    return false;
+}
+
+// Run one-time provisioning: write SparkFun config, lock, generate key, lock slot.
+// Returns true on success.
+static bool do_provision_atecc() {
+    if (!g_atecc_available) return false;
+    g_atecc.wakeUp();
+    if (!g_atecc.configLockStatus) {
+        if (!g_atecc.writeConfigSparkFun()) { g_atecc.sleep(); return false; }
+        if (!g_atecc.lockConfig())          { g_atecc.sleep(); return false; }
+        Serial.println("[atecc] config zone locked");
+    }
+    if (!g_atecc.slot0LockStatus) {
+        if (!g_atecc.createNewKeyPair(0))  { g_atecc.sleep(); return false; }
+        if (!g_atecc.lockDataSlot0())      { g_atecc.sleep(); return false; }
+        Serial.println("[atecc] key generated and locked in slot 0");
+    }
+    g_atecc.generatePublicKey(0, false);
+    memcpy(g_atecc_pubkey, g_atecc.publicKey64Bytes, PUBLIC_KEY_SIZE);
+    g_atecc.sleep();
+    g_atecc_ok = true;
+    Serial.println("[atecc] provisioning complete");
+    return true;
+}
+
+static void draw_atecc_intro() {
+    display.setFullWindow();
+    display.firstPage();
+    do {
+        page_header("IDENTITY SETUP");
+        display.setFont(&FreeMono9pt7b);
+        display.setTextColor(GxEPD_BLACK);
+        display.setCursor(8, 50);
+        display.print("Your badge needs a");
+        display.setCursor(8, 68);
+        display.print("unique hardware key.");
+        display.setCursor(8, 86);
+        display.print("This happens once and");
+        display.setCursor(8, 104);
+        display.print("cannot be undone.");
+        display.drawFastHLine(8, 116, display.width() - 16, GxEPD_BLACK);
+        display.setCursor(8, 132);
+        display.print("Do not power off.");
+        page_footer("SEL:begin CXL:skip");
+    } while (display.nextPage());
+    display.hibernate();
+}
+
+static void draw_atecc_done(bool success) {
+    display.setFullWindow();
+    display.firstPage();
+    do {
+        page_header(success ? "IDENTITY READY" : "SETUP FAILED");
+        display.setFont(&FreeMono9pt7b);
+        display.setTextColor(GxEPD_BLACK);
+        if (success) {
+            display.setCursor(8, 50);
+            display.print("Your badge now has a");
+            display.setCursor(8, 68);
+            display.print("unique hardware key");
+            display.setCursor(8, 86);
+            display.print("that cannot be copied.");
+            display.setCursor(8, 104);
+            display.print("Beacons are signed.");
+        } else {
+            display.setCursor(8, 50);
+            display.print("Provisioning failed.");
+            display.setCursor(8, 68);
+            display.print("Check that ATECC608B");
+            display.setCursor(8, 86);
+            display.print("is at I2C 0x60.");
+            display.setCursor(8, 104);
+            display.print("ESPNow still works");
+            display.setCursor(8, 122);
+            display.print("without signatures.");
+        }
+        page_footer("any button to continue");
+    } while (display.nextPage());
+    display.hibernate();
+}
+
 // ── ESPNow logic ──────────────────────────────────────────────────────────────
 
 static void make_default_callsign(char* out, size_t len) {
@@ -937,6 +1067,24 @@ static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
         upsert_peer(mac, msg, -50);
         memcpy((void*)&g_last_recv, &msg, sizeof(BeaconMsg));
 
+        // If beacon is signed, queue ECDSA verification for main loop
+        bool has_sig = false;
+        for (int i = 0; i < PUBLIC_KEY_SIZE; i++) {
+            if (msg.pubkey[i]) { has_sig = true; break; }
+        }
+        if (has_sig && g_atecc_ok && !g_needs_verify) {
+            memcpy(&g_pending_verify, &msg, sizeof(BeaconMsg));
+            memcpy(g_pending_ver_mac, mac, 6);
+            g_needs_verify = true;
+        }
+        // Mark peer as having sent a signature (regardless of verify result yet)
+        for (int i = 0; i < g_peer_count; i++) {
+            if (memcmp(g_peers[i].mac, mac, 6) == 0) {
+                g_peers[i].sig_present = has_sig;
+                break;
+            }
+        }
+
         // Push to inbox (ring buffer — newest at front)
         if (g_inbox_count >= MAX_INBOX)
             memmove(&g_inbox[1], &g_inbox[0], sizeof(InboxEntry) * (MAX_INBOX - 1));
@@ -973,9 +1121,23 @@ static void send_beacon() {
     strncpy(msg.name, g_callsign, sizeof(msg.name));
     WiFi.macAddress(msg.mac);
     msg.counter = ++g_send_count;
+
+    if (g_atecc_ok) {
+        // Sign the first BEACON_SIGN_LEN bytes
+        uint8_t digest[32];
+        mbedtls_sha256((const uint8_t*)&msg, BEACON_SIGN_LEN, digest, 0);
+        g_atecc.wakeUp();
+        if (g_atecc.createSignature(digest, 0)) {
+            memcpy(msg.pubkey, g_atecc_pubkey, PUBLIC_KEY_SIZE);
+            memcpy(msg.sig,    g_atecc.signature, SIGNATURE_SIZE);
+        }
+        g_atecc.sleep();
+    }
+
     uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     esp_now_send(broadcast, (uint8_t*)&msg, sizeof(msg));
-    Serial.printf("[espnow] sent beacon #%u as %s\n", msg.counter, g_callsign);
+    Serial.printf("[espnow] sent beacon #%u as %s%s\n",
+        msg.counter, g_callsign, g_atecc_ok ? " [signed]" : "");
 }
 
 static void shutdown_espnow() {
@@ -1168,9 +1330,16 @@ static void draw_espnow_peers() {
                 display.setCursor(8, y_name);
                 display.print(g_peers[idx].name);
 
-                // [E] encryption indicator (right-aligned, same color as name)
+                // Right-side indicators: [V] verified, [!] spoof, [E] encrypted
+                // Layout: [V] at x=194, [E] at x=227 (3-char each × 11px = 33px)
                 esp_now_peer_info_t pi = {};
-                if (esp_now_get_peer(g_peers[idx].mac, &pi) == ESP_OK && pi.encrypt) {
+                bool encrypted = (esp_now_get_peer(g_peers[idx].mac, &pi) == ESP_OK && pi.encrypt);
+
+                if (g_peers[idx].sig_present) {
+                    display.setCursor(194, y_name);
+                    display.print(g_peers[idx].verified ? "[V]" : "[!]");
+                }
+                if (encrypted) {
                     display.setCursor(227, y_name);
                     display.print("[E]");
                 }
@@ -1483,10 +1652,12 @@ static void dispatch_render() {
         case STATE_RNG:          draw_rng();          break;
         case STATE_DISPLAY_TEST: draw_display_test(); break;
         case STATE_GUIDE:        draw_guide();        break;
-        case STATE_ESPNOW:        draw_espnow();         break;
-        case STATE_ESPNOW_EDIT:   draw_espnow_edit();    break;
-        case STATE_ESPNOW_TARGET: draw_espnow_target();  break;
-        case STATE_ESPNOW_MSG:    draw_espnow_msg();     break;
+        case STATE_ESPNOW:        draw_espnow();              break;
+        case STATE_ESPNOW_EDIT:   draw_espnow_edit();         break;
+        case STATE_ESPNOW_TARGET: draw_espnow_target();       break;
+        case STATE_ESPNOW_MSG:    draw_espnow_msg();          break;
+        case STATE_ATECC_INTRO:   draw_atecc_intro();         break;
+        case STATE_ATECC_DONE:    draw_atecc_done(g_atecc_ok); break;
     }
     g_needs_redraw = false;
 }
@@ -1530,7 +1701,12 @@ static void handle_buttons(uint8_t pressed) {
                         break;
                     case 7:
                         init_espnow();
-                        g_state = STATE_ESPNOW;
+                        if (!g_atecc_ok && !check_atecc() && g_atecc_available) {
+                            // Chip found but not provisioned — show onboarding
+                            g_state = STATE_ATECC_INTRO;
+                        } else {
+                            g_state = STATE_ESPNOW;
+                        }
                         break;
                 }
                 g_needs_redraw = true;
@@ -1737,6 +1913,23 @@ static void handle_buttons(uint8_t pressed) {
             }
             break;
 
+        case STATE_ATECC_INTRO:
+            if (pressed & BTN_SELECT) {
+                bool ok = do_provision_atecc();
+                g_state = STATE_ATECC_DONE;
+                g_needs_redraw = true;
+                if (ok) Serial.println("[atecc] onboarding complete");
+                else    Serial.println("[atecc] onboarding failed");
+            }
+            if (pressed & BTN_CANCEL)
+                { g_state = STATE_ESPNOW; g_needs_redraw = true; }
+            break;
+
+        case STATE_ATECC_DONE:
+            if (pressed)
+                { g_state = STATE_ESPNOW; g_needs_redraw = true; }
+            break;
+
         default:
             if (pressed & BTN_CANCEL)
                 { g_state = STATE_MENU; g_needs_redraw = true; }
@@ -1828,6 +2021,27 @@ void loop() {
         pong.counter = ++g_send_count;
         esp_now_send(g_pong_mac, (uint8_t*)&pong, sizeof(pong));
         Serial.println("[espnow] sent pong");
+    }
+
+    // ECDSA verification (deferred from on_recv callback to main loop)
+    if (g_needs_verify && g_atecc_ok) {
+        g_needs_verify = false;
+        uint8_t digest[32];
+        mbedtls_sha256((const uint8_t*)&g_pending_verify, BEACON_SIGN_LEN, digest, 0);
+        g_atecc.wakeUp();
+        bool ok = g_atecc.verifySignature(digest, g_pending_verify.sig, g_pending_verify.pubkey);
+        g_atecc.sleep();
+        for (int i = 0; i < g_peer_count; i++) {
+            if (memcmp(g_peers[i].mac, g_pending_ver_mac, 6) == 0) {
+                g_peers[i].verified = ok;
+                memcpy(g_peers[i].pubkey, g_pending_verify.pubkey, PUBLIC_KEY_SIZE);
+                break;
+            }
+        }
+        Serial.printf("[atecc] verify from %s: %s\n",
+            g_pending_verify.name, ok ? "OK" : "FAIL");
+        if (g_state == STATE_ESPNOW && g_espnow_tab == 1)
+            g_needs_redraw = true;
     }
 
     if (millis() - s_last_activity >= SLEEP_AFTER_MS) {
