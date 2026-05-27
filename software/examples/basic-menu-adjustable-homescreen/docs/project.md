@@ -125,13 +125,17 @@ correct `draw_*()` function for the current state.
 | State | Screen |
 |---|---|
 | `STATE_HOME` | Home screen — custom image (from NVS) or text fallback |
-| `STATE_MENU` | 7-item main menu |
+| `STATE_MENU` | 8-item main menu |
 | `STATE_SYS_INFO` | ESP32 chip info |
 | `STATE_BTN_TEST` | Live button press display |
 | `STATE_I2C_SCAN` | I²C bus scan results |
 | `STATE_RNG` | 16 bytes of hardware random output |
 | `STATE_DISPLAY_TEST` | Four graphics patterns |
 | `STATE_GUIDE` | Pageable lesson screens (Hardware or Software guide) |
+| `STATE_ESPNOW` | ESPNow three-tab UI (BEACON / PEERS / INBOX) |
+| `STATE_ESPNOW_EDIT` | Callsign character editor |
+| `STATE_ESPNOW_TARGET` | Unicast action picker (PING / MESSAGE) |
+| `STATE_ESPNOW_MSG` | Message text composer |
 
 ### `setup()`
 
@@ -284,6 +288,133 @@ If you want to go back to the original badge firmware:
 | Adafruit GFX Library | ^1.11.9 | Drawing primitives (text, shapes, bitmaps) |
 | Adafruit BusIO | ^1.16.1 | SPI/I²C abstraction used by GFX |
 | Preferences | (ESP32 core) | NVS key-value store — persists home screen image |
+
+---
+
+## ESPNow (Menu Item 8)
+
+ESPNow is Espressif's direct 2.4 GHz peer-to-peer protocol. Badges talk
+to each other without a router or access point — range is roughly 100–200 m
+open air, 10–50 m indoors.
+
+### Lifecycle
+
+ESPNow is **fully on-demand**. It only runs while the user is inside the
+ESPNow screen family. Entering menu item 8 calls `init_espnow()`, which starts
+Wi-Fi STA mode and registers the receive callback. Pressing CANCEL from any
+ESPNow screen calls `shutdown_espnow()`, which runs `esp_now_deinit()` and
+`WiFi.mode(WIFI_OFF)`. The badge returns to its normal low-power state with
+no background radio activity.
+
+### Three-Tab UI
+
+LEFT / RIGHT cycles between three sub-screens:
+
+| Tab | What it shows | Key buttons |
+|---|---|---|
+| BEACON | Own callsign, MAC, sent count, peer count, last RTT, last received badge | SELECT = send beacon, UP = edit callsign |
+| PEERS | Scrollable list of all discovered badges with RSSI bar and proximity tier | UP/DN = scroll, SELECT = target a peer |
+| INBOX | Last 5 received messages (beacon, ping, or text) | UP/DN = scroll |
+
+### Callsign
+
+On first boot, each badge derives a unique callsign from its MAC address:
+
+```
+NCB-XXXXXX   (last 3 MAC bytes in hex — 16 million unique combinations)
+```
+
+`NCB` = Null City Badge. The callsign is written to NVS and used on every
+subsequent boot until the user overrides it.
+
+To edit: from the BEACON tab press UP. Use UP/DOWN to scroll the character
+set (A–Z, 0–9, space, -), RIGHT to advance to the next position, and SELECT
+to save. CANCEL discards all changes. The new callsign is immediately saved
+to NVS and persists across power cycles.
+
+### Packet Format
+
+```cpp
+enum MsgType : uint8_t { MSG_BEACON, MSG_PING, MSG_PONG, MSG_TEXT };
+
+struct BeaconMsg {
+    MsgType  type;       // 1 byte
+    char     name[16];   // sender callsign
+    uint8_t  mac[6];     // sender MAC (ground-truth identity)
+    uint32_t counter;    // rolling send count
+    char     text[32];   // payload for MSG_TEXT / MSG_PING
+};                       // total: 59 bytes (well under 250-byte ESPNow limit)
+```
+
+MAC is the authoritative unique ID. The callsign is human-readable but not
+trusted for uniqueness — the peer table keys on MAC.
+
+### Peer Discovery
+
+Every received packet calls `upsert_peer()`, which adds the sender to
+`g_peers[10]` (keyed by MAC) or updates their name and timestamp. The PEERS
+tab shows all discovered badges; RSSI updates via promiscuous mode each time
+a new beacon arrives.
+
+### Ping / RTT
+
+From the PEERS tab, press SELECT on a peer and choose PING. The badge sends
+a `MSG_PING` unicast; the receiving badge auto-replies with `MSG_PONG` in its
+receive callback. Round-trip time is displayed on the BEACON tab (`RTT: N ms`).
+
+> **Both badges must be on the ESPNow screen and have discovered each other
+> (via at least one beacon exchange) before a ping will receive a reply.**
+> If only one badge is in the ESPNow screen, the ping will show "waiting..."
+> indefinitely until the second badge enters the screen and beacons.
+
+### Messaging
+
+From the PEERS tab, SELECT a peer → MESSAGE. A character picker opens (same
+controls as the callsign editor). SELECT sends the text as a `MSG_TEXT`
+unicast. The message appears in the recipient's INBOX tab.
+
+### RSSI Proximity
+
+Each peer in the PEERS tab shows:
+
+- An 8-block signal bar (filled = strong, empty = weak)
+- A proximity tier: **CLOSE** (> −50 dBm), **NEAR** (−50 to −70 dBm), **FAR** (< −70 dBm)
+- The raw dBm reading
+
+RSSI is captured by a promiscuous-mode callback that reads signal strength
+from the 802.11 management frame header. It updates every time a new beacon
+is received — **RSSI does not refresh between beacons**. To see a new reading
+after moving badges, press SELECT on either badge to send a fresh beacon.
+
+Typical readings for ESP32-S3 at 2.4 GHz:
+
+| Distance | Approximate RSSI |
+|---|---|
+| ~1 inch | −30 to −40 dBm (6–8 bars, CLOSE) |
+| ~1 metre | −50 to −60 dBm (4–5 bars, NEAR) |
+| ~10 metres | −70 to −80 dBm (1–2 bars, FAR) |
+
+### Encryption (AES-128)
+
+All unicast packets (ping, pong, text) are encrypted with a shared AES-128
+key. The keys are compiled into the firmware:
+
+```cpp
+static const uint8_t ESPNOW_PMK[] = "NullCity-Badge-1";  // Primary Master Key
+static const uint8_t ESPNOW_LMK[] = "Badge-LinkKey-01";  // Link Key (per peer)
+```
+
+When a peer is added via `ensure_unicast_peer()`, `peer.encrypt = true` and
+the LMK is set. Encrypted peers show a `[E]` indicator in the PEERS tab.
+
+Broadcast beacons (`FF:FF:FF:FF:FF:FF`) are always unencrypted — ESPNow does
+not support encryption on broadcast peers.
+
+> **Testing encryption requires three badges.** Flash badge C with a
+> *different* PMK (e.g. change `"NullCity-Badge-1"` to `"NullCity-Badge-X"`).
+> Badge C will see the radio traffic but its receive callback will not fire
+> for unicast packets from badges A and B — confirming the payload is
+> opaque without the matching key.
 
 ---
 
