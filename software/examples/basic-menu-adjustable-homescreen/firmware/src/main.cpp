@@ -83,8 +83,20 @@ static int           g_inbox_cursor = 0;
 static const char EDIT_CHARSET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
 static const int  EDIT_CHARSET_LEN = sizeof(EDIT_CHARSET) - 1;
 static char       g_edit_buf[16]  = {};
-static int        g_edit_pos      = 0;  // current cursor column
-static int        g_edit_char_idx = 0;  // index into EDIT_CHARSET for current pos
+static int        g_edit_pos      = 0;
+static int        g_edit_char_idx = 0;
+
+// Unicast targeting + ping/pong + messaging
+static int           g_target_peer_idx = -1;
+static int           g_target_cursor   = 0;   // 0=PING 1=MESSAGE
+static uint32_t      g_ping_sent_at    = 0;
+static int32_t       g_last_rtt        = -1;  // ms, -1=no measurement yet
+static bool          g_ping_pending    = false;
+static volatile bool g_pong_flag       = false;
+static uint8_t       g_pong_mac[6]     = {};
+static char          g_msg_buf[32]     = {};
+static int           g_msg_pos         = 0;
+static int           g_msg_char_idx    = 0;
 
 // ── App state ─────────────────────────────────────────────────────────────────
 enum AppState {
@@ -98,6 +110,8 @@ enum AppState {
     STATE_GUIDE,
     STATE_ESPNOW,
     STATE_ESPNOW_EDIT,
+    STATE_ESPNOW_TARGET,
+    STATE_ESPNOW_MSG,
 };
 
 static AppState g_state        = STATE_MENU;
@@ -851,6 +865,16 @@ static void upsert_peer(const uint8_t* mac, const BeaconMsg& msg, int8_t rssi) {
     }
 }
 
+static void ensure_unicast_peer(const uint8_t* mac) {
+    if (!esp_now_is_peer_exist(mac)) {
+        esp_now_peer_info_t peer = {};
+        memcpy(peer.peer_addr, mac, 6);
+        peer.channel = 0;
+        peer.encrypt = false;
+        esp_now_add_peer(&peer);
+    }
+}
+
 static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
     if ((size_t)len == sizeof(BeaconMsg)) {
         BeaconMsg msg;
@@ -858,8 +882,7 @@ static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
         upsert_peer(mac, msg, -50);
         memcpy((void*)&g_last_recv, &msg, sizeof(BeaconMsg));
 
-        // Push to inbox (ring buffer — oldest entry dropped when full)
-        int slot = g_inbox_count < 5 ? g_inbox_count : 4;
+        // Push to inbox (ring buffer — newest at front)
         if (g_inbox_count >= 5)
             memmove(&g_inbox[1], &g_inbox[0], sizeof(InboxEntry) * 4);
         else
@@ -867,10 +890,23 @@ static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
         strncpy(g_inbox[0].name,    msg.name, sizeof(g_inbox[0].name));
         strncpy(g_inbox[0].text,    msg.text, sizeof(g_inbox[0].text));
         g_inbox[0].counter = msg.counter;
-        (void)slot;
+
+        // Handle ping — queue a pong reply via main loop
+        if (msg.type == MSG_PING) {
+            memcpy(g_pong_mac, mac, 6);
+            g_pong_flag = true;
+        }
+
+        // Handle pong — measure RTT
+        if (msg.type == MSG_PONG && g_ping_pending) {
+            g_last_rtt    = (int32_t)(millis() - g_ping_sent_at);
+            g_ping_pending = false;
+        }
 
         g_recv_flag = true;
-        Serial.printf("[espnow] recv from %s (%02X:%02X:%02X:%02X:%02X:%02X) #%u\n",
+        Serial.printf("[espnow] recv %s from %s (%02X:%02X:%02X:%02X:%02X:%02X) #%u\n",
+            msg.type == MSG_PING ? "PING" : msg.type == MSG_PONG ? "PONG" :
+            msg.type == MSG_TEXT ? "TEXT" : "BCN",
             msg.name, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], msg.counter);
     }
 }
@@ -890,13 +926,17 @@ static void shutdown_espnow() {
     if (!g_espnow_up) return;
     esp_now_deinit();
     WiFi.mode(WIFI_OFF);
-    g_espnow_up    = false;
-    g_peer_count   = 0;
-    g_send_count   = 0;
-    g_inbox_count  = 0;
-    g_espnow_tab   = 0;
-    g_peers_cursor = 0;
-    g_inbox_cursor = 0;
+    g_espnow_up       = false;
+    g_peer_count      = 0;
+    g_send_count      = 0;
+    g_inbox_count     = 0;
+    g_espnow_tab      = 0;
+    g_peers_cursor    = 0;
+    g_inbox_cursor    = 0;
+    g_ping_pending    = false;
+    g_pong_flag       = false;
+    g_last_rtt        = -1;
+    g_target_peer_idx = -1;
     memset((void*)&g_last_recv, 0, sizeof(g_last_recv));
     memset(g_inbox, 0, sizeof(g_inbox));
     Serial.println("[espnow] shut down");
@@ -987,9 +1027,18 @@ static void draw_espnow_beacon() {
         display.setCursor(8, 68);
         display.print(buf);
 
-        display.drawFastHLine(8, 76, display.width() - 16, GxEPD_BLACK);
+        if (g_last_rtt >= 0) {
+            snprintf(buf, sizeof(buf), "RTT: %d ms", (int)g_last_rtt);
+            display.setCursor(8, 84);
+            display.print(buf);
+        } else if (g_ping_pending) {
+            display.setCursor(8, 84);
+            display.print("RTT: waiting...");
+        }
 
-        display.setCursor(8, 92);
+        display.drawFastHLine(8, 93, display.width() - 16, GxEPD_BLACK);
+
+        display.setCursor(8, 108);
         display.print("Last recv:");
 
         if (g_last_recv.mac[0] || g_last_recv.mac[1] || g_last_recv.mac[2]) {
@@ -998,12 +1047,12 @@ static void draw_espnow_beacon() {
                 "%02X:%02X:%02X:%02X:%02X:%02X",
                 g_last_recv.mac[0], g_last_recv.mac[1], g_last_recv.mac[2],
                 g_last_recv.mac[3], g_last_recv.mac[4], g_last_recv.mac[5]);
-            display.setCursor(8, 108);
-            display.print(g_last_recv.name);
             display.setCursor(8, 124);
+            display.print(g_last_recv.name);
+            display.setCursor(8, 140);
             display.print(peer_mac);
         } else {
-            display.setCursor(8, 108);
+            display.setCursor(8, 124);
             display.print("(none yet)");
         }
 
@@ -1178,6 +1227,83 @@ static void draw_espnow_edit() {
     display.hibernate();
 }
 
+static void draw_espnow_target() {
+    display.setFullWindow();
+    display.firstPage();
+    do {
+        const char* peer_name = (g_target_peer_idx >= 0) ? g_peers[g_target_peer_idx].name : "?";
+        char title[32];
+        snprintf(title, sizeof(title), "TARGET: %s", peer_name);
+        page_header(title);
+
+        display.setFont(&FreeMono9pt7b);
+
+        const char* options[] = { "PING", "MESSAGE" };
+        for (int i = 0; i < 2; i++) {
+            int y = 64 + i * 28;
+            if (i == g_target_cursor) {
+                display.fillRect(0, y - 14, display.width(), 18, GxEPD_BLACK);
+                display.setTextColor(GxEPD_WHITE);
+            } else {
+                display.setTextColor(GxEPD_BLACK);
+            }
+            display.setCursor(16, y);
+            display.print(options[i]);
+        }
+        display.setTextColor(GxEPD_BLACK);
+
+        page_footer("UP/DN:choose SEL:go CXL:back");
+    } while (display.nextPage());
+    display.hibernate();
+}
+
+static void draw_espnow_msg() {
+    display.setFullWindow();
+    display.firstPage();
+    do {
+        const char* peer_name = (g_target_peer_idx >= 0) ? g_peers[g_target_peer_idx].name : "?";
+        char title[32];
+        snprintf(title, sizeof(title), "MSG TO: %s", peer_name);
+        page_header(title);
+
+        display.setFont(&FreeMono9pt7b);
+        display.setTextColor(GxEPD_BLACK);
+
+        // Show message buffer with highlighted cursor position
+        int len = max((int)strlen(g_msg_buf), g_msg_pos + 1);
+        if (len > 12) len = 12;
+        for (int i = 0; i < len; i++) {
+            int x = 8 + i * 20;
+            char ch = (i < (int)strlen(g_msg_buf)) ? g_msg_buf[i] : ' ';
+            if (i == g_msg_pos) {
+                display.fillRect(x - 2, 34, 18, 20, GxEPD_BLACK);
+                display.setTextColor(GxEPD_WHITE);
+            } else {
+                display.setTextColor(GxEPD_BLACK);
+            }
+            display.setCursor(x, 50);
+            display.print(ch);
+        }
+        display.setTextColor(GxEPD_BLACK);
+
+        int prev_idx = (g_msg_char_idx - 1 + EDIT_CHARSET_LEN) % EDIT_CHARSET_LEN;
+        int next_idx = (g_msg_char_idx + 1) % EDIT_CHARSET_LEN;
+
+        display.drawFastHLine(8, 66, display.width() - 16, GxEPD_BLACK);
+        display.setCursor(8, 84);
+        display.print("UP  ["); display.print(EDIT_CHARSET[prev_idx]); display.print("]");
+        display.setFont(&FreeMonoBold9pt7b);
+        display.setCursor(8, 102);
+        display.print("    ["); display.print(EDIT_CHARSET[g_msg_char_idx]); display.print("] <- current");
+        display.setFont(&FreeMono9pt7b);
+        display.setCursor(8, 118);
+        display.print("DN  ["); display.print(EDIT_CHARSET[next_idx]); display.print("]");
+
+        page_footer("RGT:next SEL:send CXL:cancel");
+    } while (display.nextPage());
+    display.hibernate();
+}
+
 static void draw_espnow() {
     switch (g_espnow_tab) {
         case 0: draw_espnow_beacon(); break;
@@ -1198,8 +1324,10 @@ static void dispatch_render() {
         case STATE_RNG:          draw_rng();          break;
         case STATE_DISPLAY_TEST: draw_display_test(); break;
         case STATE_GUIDE:        draw_guide();        break;
-        case STATE_ESPNOW:       draw_espnow();       break;
-        case STATE_ESPNOW_EDIT:  draw_espnow_edit();  break;
+        case STATE_ESPNOW:        draw_espnow();         break;
+        case STATE_ESPNOW_EDIT:   draw_espnow_edit();    break;
+        case STATE_ESPNOW_TARGET: draw_espnow_target();  break;
+        case STATE_ESPNOW_MSG:    draw_espnow_msg();     break;
     }
     g_needs_redraw = false;
 }
@@ -1296,10 +1424,104 @@ static void handle_buttons(uint8_t pressed) {
                 if (g_espnow_tab == 1 && g_peers_cursor < g_peer_count - 1)
                     { g_peers_cursor++; g_needs_redraw = true; }
             }
-            if (pressed & BTN_SELECT && g_espnow_tab == 0)
-                { send_beacon(); g_needs_redraw = true; }
+            if (pressed & BTN_SELECT) {
+                if (g_espnow_tab == 0) {
+                    send_beacon(); g_needs_redraw = true;
+                } else if (g_espnow_tab == 1 && g_peer_count > 0) {
+                    g_target_peer_idx = g_peers_cursor;
+                    g_target_cursor   = 0;
+                    g_state = STATE_ESPNOW_TARGET;
+                    g_needs_redraw = true;
+                }
+            }
             if (pressed & BTN_CANCEL)
                 { shutdown_espnow(); g_state = STATE_MENU; g_needs_redraw = true; }
+            break;
+
+        case STATE_ESPNOW_TARGET:
+            if (pressed & BTN_UP)
+                { g_target_cursor = (g_target_cursor - 1 + 2) % 2; g_needs_redraw = true; }
+            if (pressed & BTN_DOWN)
+                { g_target_cursor = (g_target_cursor + 1) % 2; g_needs_redraw = true; }
+            if (pressed & BTN_SELECT) {
+                if (g_target_cursor == 0) {
+                    // PING
+                    ensure_unicast_peer(g_peers[g_target_peer_idx].mac);
+                    BeaconMsg ping = {};
+                    ping.type = MSG_PING;
+                    strncpy(ping.name, g_callsign, sizeof(ping.name));
+                    WiFi.macAddress(ping.mac);
+                    ping.counter = ++g_send_count;
+                    esp_now_send(g_peers[g_target_peer_idx].mac, (uint8_t*)&ping, sizeof(ping));
+                    g_ping_sent_at = millis();
+                    g_ping_pending = true;
+                    Serial.printf("[espnow] ping -> %s\n", g_peers[g_target_peer_idx].name);
+                    g_espnow_tab = 0;  // go watch BEACON for RTT
+                    g_state = STATE_ESPNOW;
+                } else {
+                    // MESSAGE
+                    memset(g_msg_buf, 0, sizeof(g_msg_buf));
+                    g_msg_buf[0]    = 'A';
+                    g_msg_pos       = 0;
+                    g_msg_char_idx  = 0;
+                    g_state = STATE_ESPNOW_MSG;
+                }
+                g_needs_redraw = true;
+            }
+            if (pressed & BTN_CANCEL)
+                { g_state = STATE_ESPNOW; g_espnow_tab = 1; g_needs_redraw = true; }
+            break;
+
+        case STATE_ESPNOW_MSG:
+            if (pressed & BTN_UP) {
+                g_msg_char_idx = (g_msg_char_idx - 1 + EDIT_CHARSET_LEN) % EDIT_CHARSET_LEN;
+                g_msg_buf[g_msg_pos] = EDIT_CHARSET[g_msg_char_idx];
+                g_needs_redraw = true;
+            }
+            if (pressed & BTN_DOWN) {
+                g_msg_char_idx = (g_msg_char_idx + 1) % EDIT_CHARSET_LEN;
+                g_msg_buf[g_msg_pos] = EDIT_CHARSET[g_msg_char_idx];
+                g_needs_redraw = true;
+            }
+            if (pressed & BTN_RIGHT) {
+                if (g_msg_pos < 11) {
+                    g_msg_pos++;
+                    if (g_msg_pos >= (int)strlen(g_msg_buf)) g_msg_buf[g_msg_pos] = 'A';
+                    g_msg_char_idx = 0;
+                    for (int i = 0; i < EDIT_CHARSET_LEN; i++)
+                        if (EDIT_CHARSET[i] == g_msg_buf[g_msg_pos]) { g_msg_char_idx = i; break; }
+                    g_needs_redraw = true;
+                }
+            }
+            if (pressed & BTN_LEFT) {
+                if (g_msg_pos > 0) {
+                    g_msg_pos--;
+                    g_msg_char_idx = 0;
+                    for (int i = 0; i < EDIT_CHARSET_LEN; i++)
+                        if (EDIT_CHARSET[i] == g_msg_buf[g_msg_pos]) { g_msg_char_idx = i; break; }
+                    g_needs_redraw = true;
+                }
+            }
+            if (pressed & BTN_SELECT) {
+                g_msg_buf[g_msg_pos + 1] = '\0';
+                // Trim trailing spaces
+                int l = strlen(g_msg_buf);
+                while (l > 1 && g_msg_buf[l-1] == ' ') g_msg_buf[--l] = '\0';
+                // Send as unicast MSG_TEXT
+                ensure_unicast_peer(g_peers[g_target_peer_idx].mac);
+                BeaconMsg txt = {};
+                txt.type = MSG_TEXT;
+                strncpy(txt.name, g_callsign, sizeof(txt.name));
+                WiFi.macAddress(txt.mac);
+                txt.counter = ++g_send_count;
+                strncpy(txt.text, g_msg_buf, sizeof(txt.text));
+                esp_now_send(g_peers[g_target_peer_idx].mac, (uint8_t*)&txt, sizeof(txt));
+                Serial.printf("[espnow] msg -> %s: \"%s\"\n", g_peers[g_target_peer_idx].name, g_msg_buf);
+                g_state = STATE_ESPNOW; g_espnow_tab = 1;
+                g_needs_redraw = true;
+            }
+            if (pressed & BTN_CANCEL)
+                { g_state = STATE_ESPNOW_TARGET; g_needs_redraw = true; }
             break;
 
         case STATE_ESPNOW_EDIT:
@@ -1413,6 +1635,19 @@ void loop() {
     if (g_recv_flag && g_state == STATE_ESPNOW) {
         g_recv_flag    = false;
         g_needs_redraw = true;
+    }
+
+    // Send pong reply from main loop (safe context)
+    if (g_pong_flag && g_espnow_up) {
+        g_pong_flag = false;
+        ensure_unicast_peer(g_pong_mac);
+        BeaconMsg pong = {};
+        pong.type = MSG_PONG;
+        strncpy(pong.name, g_callsign, sizeof(pong.name));
+        WiFi.macAddress(pong.mac);
+        pong.counter = ++g_send_count;
+        esp_now_send(g_pong_mac, (uint8_t*)&pong, sizeof(pong));
+        Serial.println("[espnow] sent pong");
     }
 
     if (millis() - s_last_activity >= SLEEP_AFTER_MS) {
