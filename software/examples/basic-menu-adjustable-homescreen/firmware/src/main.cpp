@@ -75,9 +75,16 @@ static PeerEntry     g_peers[10]   = {};
 static int           g_peer_count  = 0;
 static InboxEntry    g_inbox[5]    = {};
 static int           g_inbox_count = 0;
-static int           g_espnow_tab  = 0;  // 0=BEACON 1=PEERS 2=INBOX
+static int           g_espnow_tab   = 0;  // 0=BEACON 1=PEERS 2=INBOX
 static int           g_peers_cursor = 0;
 static int           g_inbox_cursor = 0;
+
+// Callsign editor
+static const char EDIT_CHARSET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -";
+static const int  EDIT_CHARSET_LEN = sizeof(EDIT_CHARSET) - 1;
+static char       g_edit_buf[16]  = {};
+static int        g_edit_pos      = 0;  // current cursor column
+static int        g_edit_char_idx = 0;  // index into EDIT_CHARSET for current pos
 
 // ── App state ─────────────────────────────────────────────────────────────────
 enum AppState {
@@ -90,6 +97,7 @@ enum AppState {
     STATE_DISPLAY_TEST,
     STATE_GUIDE,
     STATE_ESPNOW,
+    STATE_ESPNOW_EDIT,
 };
 
 static AppState g_state        = STATE_MENU;
@@ -999,7 +1007,7 @@ static void draw_espnow_beacon() {
             display.print("(none yet)");
         }
 
-        page_footer("SEL:send LFT/RGT:tab CXL:back");
+        page_footer("SEL:send UP:edit L/R:tab CXL:back");
     } while (display.nextPage());
     display.hibernate();
 }
@@ -1092,6 +1100,84 @@ static void draw_espnow_inbox() {
     display.hibernate();
 }
 
+static void enter_espnow_edit() {
+    strncpy(g_edit_buf, g_callsign, sizeof(g_edit_buf));
+    g_edit_pos = 0;
+    // Find current char's index in charset
+    char c = g_edit_buf[0];
+    g_edit_char_idx = 0;
+    for (int i = 0; i < EDIT_CHARSET_LEN; i++) {
+        if (EDIT_CHARSET[i] == c) { g_edit_char_idx = i; break; }
+    }
+}
+
+static void save_callsign() {
+    // Trim trailing spaces
+    int len = strlen(g_edit_buf);
+    while (len > 1 && g_edit_buf[len - 1] == ' ') g_edit_buf[--len] = '\0';
+    strncpy(g_callsign, g_edit_buf, sizeof(g_callsign));
+    Preferences prefs;
+    prefs.begin("badge", false);
+    prefs.putString("callsign", g_callsign);
+    prefs.end();
+    Serial.printf("[espnow] callsign saved: %s\n", g_callsign);
+}
+
+static void draw_espnow_edit() {
+    display.setFullWindow();
+    display.firstPage();
+    do {
+        page_header("EDIT CALLSIGN");
+        display.setFont(&FreeMono9pt7b);
+        display.setTextColor(GxEPD_BLACK);
+
+        // Draw each character of the edit buffer, highlight current position
+        int len = max((int)strlen(g_edit_buf), g_edit_pos + 1);
+        if (len > 12) len = 12;
+        for (int i = 0; i < len; i++) {
+            int x = 8 + i * 20;
+            char ch = (i < (int)strlen(g_edit_buf)) ? g_edit_buf[i] : ' ';
+            if (i == g_edit_pos) {
+                display.fillRect(x - 2, 34, 18, 20, GxEPD_BLACK);
+                display.setTextColor(GxEPD_WHITE);
+            } else {
+                display.setTextColor(GxEPD_BLACK);
+            }
+            display.setCursor(x, 50);
+            display.print(ch);
+        }
+        display.setTextColor(GxEPD_BLACK);
+
+        // Character picker: show prev / current / next
+        int prev_idx = (g_edit_char_idx - 1 + EDIT_CHARSET_LEN) % EDIT_CHARSET_LEN;
+        int next_idx = (g_edit_char_idx + 1) % EDIT_CHARSET_LEN;
+
+        display.drawFastHLine(8, 66, display.width() - 16, GxEPD_BLACK);
+
+        display.setCursor(8, 84);
+        display.print("UP  [");
+        display.print(EDIT_CHARSET[prev_idx]);
+        display.print("]");
+
+        display.setCursor(8, 102);
+        display.setFont(&FreeMonoBold9pt7b);
+        display.print("    [");
+        display.print(EDIT_CHARSET[g_edit_char_idx]);
+        display.print("] <- current");
+        display.setFont(&FreeMono9pt7b);
+
+        display.setCursor(8, 118);
+        display.print("DN  [");
+        display.print(EDIT_CHARSET[next_idx]);
+        display.print("]");
+
+        display.drawFastHLine(8, 128, display.width() - 16, GxEPD_BLACK);
+
+        page_footer("RGT:next SEL:save CXL:cancel");
+    } while (display.nextPage());
+    display.hibernate();
+}
+
 static void draw_espnow() {
     switch (g_espnow_tab) {
         case 0: draw_espnow_beacon(); break;
@@ -1113,6 +1199,7 @@ static void dispatch_render() {
         case STATE_DISPLAY_TEST: draw_display_test(); break;
         case STATE_GUIDE:        draw_guide();        break;
         case STATE_ESPNOW:       draw_espnow();       break;
+        case STATE_ESPNOW_EDIT:  draw_espnow_edit();  break;
     }
     g_needs_redraw = false;
 }
@@ -1200,7 +1287,9 @@ static void handle_buttons(uint8_t pressed) {
             if (pressed & BTN_RIGHT)
                 { g_espnow_tab = (g_espnow_tab + 1) % 3; g_needs_redraw = true; }
             if (pressed & BTN_UP) {
-                if (g_espnow_tab == 1 && g_peers_cursor > 0)
+                if (g_espnow_tab == 0)
+                    { enter_espnow_edit(); g_state = STATE_ESPNOW_EDIT; g_needs_redraw = true; }
+                else if (g_espnow_tab == 1 && g_peers_cursor > 0)
                     { g_peers_cursor--; g_needs_redraw = true; }
             }
             if (pressed & BTN_DOWN) {
@@ -1211,6 +1300,53 @@ static void handle_buttons(uint8_t pressed) {
                 { send_beacon(); g_needs_redraw = true; }
             if (pressed & BTN_CANCEL)
                 { shutdown_espnow(); g_state = STATE_MENU; g_needs_redraw = true; }
+            break;
+
+        case STATE_ESPNOW_EDIT:
+            if (pressed & BTN_UP) {
+                g_edit_char_idx = (g_edit_char_idx - 1 + EDIT_CHARSET_LEN) % EDIT_CHARSET_LEN;
+                g_edit_buf[g_edit_pos] = EDIT_CHARSET[g_edit_char_idx];
+                g_needs_redraw = true;
+            }
+            if (pressed & BTN_DOWN) {
+                g_edit_char_idx = (g_edit_char_idx + 1) % EDIT_CHARSET_LEN;
+                g_edit_buf[g_edit_pos] = EDIT_CHARSET[g_edit_char_idx];
+                g_needs_redraw = true;
+            }
+            if (pressed & BTN_RIGHT) {
+                // Advance to next position (extend buffer if needed, max 12 chars)
+                if (g_edit_pos < 11) {
+                    g_edit_pos++;
+                    if (g_edit_pos >= (int)strlen(g_edit_buf))
+                        g_edit_buf[g_edit_pos] = 'A';
+                    // Find char index for new position
+                    g_edit_char_idx = 0;
+                    for (int i = 0; i < EDIT_CHARSET_LEN; i++) {
+                        if (EDIT_CHARSET[i] == g_edit_buf[g_edit_pos]) { g_edit_char_idx = i; break; }
+                    }
+                    g_needs_redraw = true;
+                }
+            }
+            if (pressed & BTN_LEFT) {
+                if (g_edit_pos > 0) {
+                    g_edit_pos--;
+                    g_edit_char_idx = 0;
+                    for (int i = 0; i < EDIT_CHARSET_LEN; i++) {
+                        if (EDIT_CHARSET[i] == g_edit_buf[g_edit_pos]) { g_edit_char_idx = i; break; }
+                    }
+                    g_needs_redraw = true;
+                }
+            }
+            if (pressed & BTN_SELECT) {
+                g_edit_buf[g_edit_pos + 1] = '\0';  // terminate at cursor
+                save_callsign();
+                g_state = STATE_ESPNOW;
+                g_needs_redraw = true;
+            }
+            if (pressed & BTN_CANCEL) {
+                g_state = STATE_ESPNOW;  // discard changes
+                g_needs_redraw = true;
+            }
             break;
 
         default:
