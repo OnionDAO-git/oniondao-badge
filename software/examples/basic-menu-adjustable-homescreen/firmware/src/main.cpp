@@ -1084,7 +1084,7 @@ static void draw_espnow_beacon() {
             display.print("(none yet)");
         }
 
-        page_footer("SEL:send UP:edit L/R:tab CXL:back");
+        page_footer("SEL:snd UP:edt L/R CXL");
     } while (display.nextPage());
     display.hibernate();
 }
@@ -1162,7 +1162,7 @@ static void draw_espnow_peers() {
             }
         }
 
-        page_footer("SEL:target UP/DN:scroll LFT/RGT:tab");
+        page_footer("SEL:tgt UP/DN L/R CXL");
     } while (display.nextPage());
     display.hibernate();
 }
@@ -1181,7 +1181,7 @@ static void draw_espnow_inbox() {
         } else {
             int visible = min(g_inbox_count, 3);
             for (int i = 0; i < visible; i++) {
-                int y = 34 + i * 42;
+                int y = 28 + i * 38;
                 display.drawFastHLine(0, y - 4, display.width(), GxEPD_BLACK);
 
                 char buf[32];
@@ -1277,7 +1277,7 @@ static void draw_espnow_edit() {
 
         display.drawFastHLine(8, 128, display.width() - 16, GxEPD_BLACK);
 
-        page_footer("RGT:next SEL:save CXL:cancel");
+        page_footer("RGT:nxt SEL:sav CXL");
     } while (display.nextPage());
     display.hibernate();
 }
@@ -1307,7 +1307,7 @@ static void draw_espnow_target() {
         }
         display.setTextColor(GxEPD_BLACK);
 
-        page_footer("UP/DN:choose SEL:go CXL:back");
+        page_footer("UP/DN SEL:go CXL");
     } while (display.nextPage());
     display.hibernate();
 }
@@ -1354,7 +1354,7 @@ static void draw_espnow_msg() {
         display.setCursor(8, 118);
         display.print("DN  ["); display.print(EDIT_CHARSET[next_idx]); display.print("]");
 
-        page_footer("RGT:next SEL:send CXL:cancel");
+        page_footer("RGT:nxt SEL:snd CXL");
     } while (display.nextPage());
     display.hibernate();
 }
