@@ -388,6 +388,14 @@ static const GuideScreen SW_GUIDE[] = {
 #define HW_GUIDE_COUNT 10
 #define SW_GUIDE_COUNT 10
 
+// ── Button IRQ ────────────────────────────────────────────────────────────────
+
+static volatile bool g_btn_irq = false;
+
+void IRAM_ATTR on_btn_irq() {
+    g_btn_irq = true;
+}
+
 // ── Hardware init ─────────────────────────────────────────────────────────────
 
 static void init_peripherals() {
@@ -410,6 +418,10 @@ static void init_peripherals() {
     SPI.begin(PIN_EPD_SCK, /*MISO*/-1, PIN_EPD_MOSI, PIN_EPD_CS);
     display.init(115200, true, 10, false);
     display.setRotation(1);  // landscape: 264 wide × 176 tall
+
+    // TCA9534 asserts PIN_BTN_IRQ LOW on any button change — use it instead of polling
+    pinMode(PIN_BTN_IRQ, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PIN_BTN_IRQ), on_btn_irq, FALLING);
 }
 
 // ── Buttons ───────────────────────────────────────────────────────────────────
@@ -1674,7 +1686,12 @@ void loop() {
         dispatch_render();
     }
 
-    uint8_t btns    = read_buttons();
+    // Only read I²C when TCA9534 asserts the IRQ line, or in BTN_TEST (needs live state)
+    uint8_t btns = g_last_btns;
+    if (g_btn_irq || g_state == STATE_BTN_TEST) {
+        g_btn_irq = false;
+        btns = read_buttons();
+    }
     uint8_t pressed = btns & ~g_last_btns;  // rising-edge detection
 
     // In button test, redraw whenever held-button state changes
