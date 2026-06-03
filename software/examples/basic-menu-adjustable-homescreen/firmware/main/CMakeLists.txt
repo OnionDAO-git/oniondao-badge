@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "main.cpp"
     INCLUDE_DIRS "."
-    REQUIRES espressif__arduino-esp32 GxEPD2
+    REQUIRES espressif__arduino-esp32 GxEPD2 SparkFun_ATECC
 )
 
 # The Arduino/PlatformIO build did not treat warnings as errors; ESP-IDF adds a

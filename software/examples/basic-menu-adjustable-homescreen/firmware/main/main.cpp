@@ -248,11 +248,11 @@ static void check_serial_image() {
             Serial.printf("peers,%d\r\n", g_peer_count);
             Serial.println("mac,callsign,rssi,first_seen_ms,last_seen_ms");
             for (int i = 0; i < g_peer_count; i++) {
-                Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X,%s,%d,%u,%u\r\n",
+                Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X,%s,%d,%lu,%lu\r\n",
                     g_peers[i].mac[0], g_peers[i].mac[1], g_peers[i].mac[2],
                     g_peers[i].mac[3], g_peers[i].mac[4], g_peers[i].mac[5],
                     g_peers[i].name, (int)g_peers[i].rssi,
-                    (unsigned)g_peers[i].first_seen, (unsigned)g_peers[i].last_seen);
+                    (unsigned long)g_peers[i].first_seen, (unsigned long)g_peers[i].last_seen);
             }
             Serial.println("OK");
             memset(hdr, 0, sizeof(hdr));
@@ -690,7 +690,8 @@ static void add_ping_peer(const uint8_t* mac) {
         Serial.printf("[espnow] add_ping_peer failed: %d (table full?)\n", err);
 }
 
-static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
+static void on_recv(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
+    const uint8_t* mac = recv_info->src_addr;
     if ((size_t)len == sizeof(BeaconMsg)) {
         BeaconMsg msg;
         memcpy(&msg, data, sizeof(BeaconMsg));
@@ -805,7 +806,7 @@ static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
         }
 
         g_recv_flag = true;
-        Serial.printf("[espnow] recv %s from %s (%02X:%02X:%02X:%02X:%02X:%02X) #%u\n",
+        Serial.printf("[espnow] recv %s from %s (%02X:%02X:%02X:%02X:%02X:%02X) #%lu\n",
             msg.type == MSG_PING ? "PING" : msg.type == MSG_PONG ? "PONG" :
             msg.type == MSG_TEXT ? "TEXT" :
             msg.type == MSG_CHALLENGE ? "CHAL" :
@@ -835,7 +836,7 @@ static void send_beacon() {
 
     uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     esp_now_send(broadcast, (uint8_t*)&msg, sizeof(msg));
-    Serial.printf("[espnow] sent beacon #%u as %s%s\n",
+    Serial.printf("[espnow] sent beacon #%lu as %s%s\n",
         msg.counter, g_callsign, g_atecc_ok ? " [signed]" : "");
 }
 
@@ -956,7 +957,7 @@ static void draw_espnow_beacon() {
         display.setCursor(8, 52);
         display.print(buf);
 
-        snprintf(buf, sizeof(buf), "Sent: %-4u  Peers: %d", g_send_count, g_peer_count);
+        snprintf(buf, sizeof(buf), "Sent: %-4lu  Peers: %d", g_send_count, g_peer_count);
         display.setCursor(8, 68);
         display.print(buf);
 
