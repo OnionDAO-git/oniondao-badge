@@ -185,6 +185,7 @@ static int g_homeSelection = 0;
 static int g_scriptSelection = 0;
 static std::vector<String> g_scripts;
 static bool g_luaDisplayActive = false;
+static bool g_luaBatchMode = false;
 static bool g_ateccReady = false;
 static uint8_t g_ateccSerial[ATECC_SERIAL_LEN] = {};
 
@@ -1639,6 +1640,7 @@ static uint16_t canvasColor(uint16_t displayColor) {
 }
 
 static void refreshLuaCanvas() {
+    if (g_luaBatchMode) return;
     display.setFullWindow();
     display.firstPage();
     do {
@@ -1647,6 +1649,17 @@ static void refreshLuaCanvas() {
     } while (display.nextPage());
     g_luaDisplayActive = true;
     g_needsRedraw = false;
+}
+
+static int luaOnionDisplayBeginBatch(lua_State*) {
+    g_luaBatchMode = true;
+    return 0;
+}
+
+static int luaOnionDisplayEndBatch(lua_State*) {
+    g_luaBatchMode = false;
+    refreshLuaCanvas();
+    return 0;
 }
 
 static void renderBitmap(const LoadedBitmap& bitmap, int x, int y, bool clearScreen) {
@@ -2368,6 +2381,10 @@ static void registerOnionLua(lua_State* L) {
     lua_setfield(L, -2, "espnow_receive");
     lua_pushcfunction(L, luaOnionHttpPost);
     lua_setfield(L, -2, "http_post");
+    lua_pushcfunction(L, luaOnionDisplayBeginBatch);
+    lua_setfield(L, -2, "display_begin_batch");
+    lua_pushcfunction(L, luaOnionDisplayEndBatch);
+    lua_setfield(L, -2, "display_end_batch");
     lua_setglobal(L, "onion");
 }
 
