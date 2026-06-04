@@ -151,30 +151,30 @@ local function hdr(char)
     char.level, char.hp, char.maxhp, char.xp, nxt)
 end
 
-local function draw_scene(char, scene_text, choices, cursor, roll_info)
+-- Layout (176px):
+--  y=14  header   y=21  divider
+--  y=36,58,80  story (22px: yAdvance=18 + 4px gap)
+--  y=92  divider
+--  y=107,123,139  choices (16px)
+--  y=149  divider   y=163  hint
+local function draw_scene(char, scene_text, choices, cursor)
   local lines = wrap(scene_text, 36)
   onion.display_begin_batch()
   onion.clear_display()
   onion.display_rect(1, 1, W-2, H-2, { fill=false, clear=false })
   onion.display_text(hdr(char), 4, 14, { font="small", clear=false })
-  onion.display_line(2, 20, W-2, 20, { clear=false })
-  -- Story lines: 18px spacing gives 5px gap between 13px-tall characters
+  onion.display_line(2, 21, W-2, 21, { clear=false })
   for i = 1, math.min(3, #lines) do
-    onion.display_text(lines[i], 4, 18 + i*18, { font="small", clear=false })
+    onion.display_text(lines[i], 4, 14 + i*22, { font="small", clear=false })
   end
-  -- 4th slot: roll info or 4th story line
-  local line4 = roll_info or lines[4]
-  if line4 then
-    onion.display_text(line4, 4, 90, { font="small", clear=false })
-  end
-  onion.display_line(2, 100, W-2, 100, { clear=false })
+  onion.display_line(2, 92, W-2, 92, { clear=false })
   for i, ch in ipairs(choices) do
-    local y   = 100 + i * 17
+    local y   = 92 + i * 16
     local pre = (i == cursor) and "> " or "  "
     onion.display_text(pre .. i .. ". " .. ch:sub(1, 28), 4, y, { font="small", clear=false })
   end
-  onion.display_line(2, 153, W-2, 153, { clear=false })
-  onion.display_text("UP/DN  SEL choose  CAN exit", 4, 167, { font="small", clear=false })
+  onion.display_line(2, 149, W-2, 149, { clear=false })
+  onion.display_text("UP/DN  SEL choose  CAN exit", 4, 163, { font="small", clear=false })
   onion.display_end_batch()
 end
 
@@ -447,12 +447,9 @@ if not scene then
 end
 
 -- Adventure loop
-local roll_info = nil
-
 while true do
   -- Draw scene and wait for choice
-  draw_scene(char, scene.scene, scene.choices, 1, roll_info)
-  roll_info = nil
+  draw_scene(char, scene.scene, scene.choices, 1)
   wait_release()
 
   local cursor = 1
@@ -461,16 +458,16 @@ while true do
     local b = onion.buttons()
     if b.cancel then chosen = "cancel"; break end
     if b.select then wait_release(); chosen = scene.choices[cursor]; break end
-    if b.up   and cursor > 1          then cursor = cursor - 1; draw_scene(char, scene.scene, scene.choices, cursor, nil); wait_release() end
-    if b.down and cursor < #scene.choices then cursor = cursor + 1; draw_scene(char, scene.scene, scene.choices, cursor, nil); wait_release() end
+    if b.up   and cursor > 1          then cursor = cursor - 1; draw_scene(char, scene.scene, scene.choices, cursor); wait_release() end
+    if b.down and cursor < #scene.choices then cursor = cursor + 1; draw_scene(char, scene.scene, scene.choices, cursor); wait_release() end
     onion.sleep(50)
   end
   if chosen == "cancel" then break end
 
   -- Roll dice and show loading
   local turn_d20 = animate_roll(20)
-  roll_info = "You rolled d20: " .. turn_d20 .. (turn_d20 >= 15 and "  (Great!)" or turn_d20 >= 10 and "  (OK)" or "  (Rough...)")
-  show_loading("The DM considers...", roll_info)
+  local roll_label = turn_d20 >= 15 and " (Great!)" or turn_d20 >= 10 and " (OK)" or " (Rough...)"
+  show_loading("The DM considers...", "d20: " .. turn_d20 .. roll_label)
 
   -- XP from previous scene
   local leveled, bonus = gain_xp(char, scene.xp or 15)
