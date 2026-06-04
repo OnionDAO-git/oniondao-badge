@@ -144,37 +144,46 @@ end
 --   y=141         H-line
 --   y=155         hint
 
-local function hdr(char)
-  local nxt = XP_NEXT[clamp(char.level, 1, #XP_NEXT)] or 99999
-  return string.format("%s %s Lv.%d  HP:%d/%d  XP:%d/%d",
-    char.race:sub(1,3), char.class:sub(1,3),
-    char.level, char.hp, char.maxhp, char.xp, nxt)
+-- Two header lines so neither overflows the 264px display width.
+-- Worst-case line 1: "Halfling Paladin  Lv.10" = 23 chars ~207px
+-- Worst-case line 2: "HP:50/50   XP:2100/2800" = 23 chars ~207px
+local function hdr_lines(char)
+  local nxt  = XP_NEXT[clamp(char.level, 1, #XP_NEXT)] or 99999
+  local line1 = char.race .. " " .. char.class .. "  Lv." .. char.level
+  local line2 = "HP:" .. char.hp .. "/" .. char.maxhp ..
+                "   XP:" .. char.xp .. "/" .. nxt
+  return line1, line2
 end
 
 -- Layout (176px):
---  y=14  header   y=21  divider
---  y=36,58,80  story (22px: yAdvance=18 + 4px gap)
---  y=92  divider
---  y=107,123,139  choices (16px)
---  y=149  divider   y=163  hint
+--  y=13          header line 1 (race class level)
+--  y=27          header line 2 (HP / XP)
+--  y=35          divider
+--  y=57,79,101   story (22px spacing, starting 22px below divider)
+--  y=111         divider
+--  y=126,142,158 choices (16px)
+--  y=167         divider
+--  y=174         hint (small)
 local function draw_scene(char, scene_text, choices, cursor)
-  local lines = wrap(scene_text, 36)
+  local lines = wrap(scene_text, 34)
+  local h1, h2 = hdr_lines(char)
   onion.display_begin_batch()
   onion.clear_display()
   onion.display_rect(1, 1, W-2, H-2, { fill=false, clear=false })
-  onion.display_text(hdr(char), 4, 14, { font="small", clear=false })
-  onion.display_line(2, 21, W-2, 21, { clear=false })
+  onion.display_text(h1, 4, 13, { font="small", clear=false })
+  onion.display_text(h2, 4, 27, { font="small", clear=false })
+  onion.display_line(2, 35, W-2, 35, { clear=false })
   for i = 1, math.min(3, #lines) do
-    onion.display_text(lines[i], 4, 14 + i*22, { font="small", clear=false })
+    onion.display_text(lines[i], 4, 35 + i*22, { font="small", clear=false })
   end
-  onion.display_line(2, 92, W-2, 92, { clear=false })
+  onion.display_line(2, 111, W-2, 111, { clear=false })
   for i, ch in ipairs(choices) do
-    local y   = 92 + i * 16
+    local y   = 111 + i * 16
     local pre = (i == cursor) and "> " or "  "
-    onion.display_text(pre .. i .. ". " .. ch:sub(1, 28), 4, y, { font="small", clear=false })
+    onion.display_text(pre .. i .. ". " .. ch:sub(1, 26), 4, y, { font="small", clear=false })
   end
-  onion.display_line(2, 149, W-2, 149, { clear=false })
-  onion.display_text("UP/DN  SEL choose  CAN exit", 4, 163, { font="small", clear=false })
+  onion.display_line(2, 167, W-2, 167, { clear=false })
+  onion.display_text("UP/DN  SEL  CAN", 4, 174, { font="small", clear=false })
   onion.display_end_batch()
 end
 
@@ -346,10 +355,13 @@ local function parse_response(body)
   text = text:gsub('\\"','"'):gsub('\\n',' '):gsub('\\\\','\\')
   local scene   = text:match('"scene"%s*:%s*"(.-[^\\])"') or "The adventure continues..."
   local xp_gain = tonumber(text:match('"xp"%s*:%s*(%d+)')) or 15
+  -- Extract choices from inside the "choices":[...] array only,
+  -- so JSON key names like "scene" are never mistaken for choices.
   local choices = {}
-  for c in text:gmatch('"([^"\\][^"]*)"') do
-    if #choices < 3 and c ~= scene and #c > 3 and #c < 60 then
-      choices[#choices+1] = c
+  local arr = text:match('"choices"%s*:%s*%[(.-)%]')
+  if arr then
+    for c in arr:gmatch('"([^"]+)"') do
+      if #choices < 3 then choices[#choices+1] = c end
     end
   end
   if #choices == 0 then choices = { "Press on", "Look around", "Rest" } end
