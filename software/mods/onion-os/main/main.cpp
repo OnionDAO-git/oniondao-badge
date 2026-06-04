@@ -637,8 +637,9 @@ static void refreshScriptList() {
     File file = root.openNextFile();
     while (file) {
         String name = file.name();
-        if (!file.isDirectory() && name.startsWith("/scripts_") && name.endsWith(".lua")) {
-            g_scripts.push_back(name);
+        if (!file.isDirectory() && name.endsWith(".lua") &&
+            (name.startsWith("/scripts_") || name.startsWith("scripts_"))) {
+            g_scripts.push_back(name.startsWith("/") ? name : "/" + name);
         }
         file = root.openNextFile();
     }
@@ -2733,6 +2734,16 @@ static void handleSerial() {
             doMqttHandshake();
         } else if (args[0] == "scripts") {
             syncScripts();
+        } else if (args[0] == "ls") {
+            File root = SPIFFS.open("/");
+            File f = root.openNextFile();
+            int n = 0;
+            while (f) {
+                Serial.printf("  [%s] %d bytes\n", f.name(), (int)f.size());
+                n++;
+                f = root.openNextFile();
+            }
+            Serial.printf("Total: %d files\n", n);
         } else if (args[0] == "run" && args.size() >= 2) {
             runScriptByName(args[1]);
         } else if ((args[0] == "delete" || args[0] == "rm") && args.size() >= 2) {
