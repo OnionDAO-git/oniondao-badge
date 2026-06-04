@@ -1652,6 +1652,27 @@ static void refreshLuaCanvas() {
     g_needsRedraw = false;
 }
 
+static int luaOnionNvsSet(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    const char* val = luaL_checkstring(L, 2);
+    Preferences p;
+    p.begin("dnd-save", false);
+    p.putString(key, val);
+    p.end();
+    return 0;
+}
+
+static int luaOnionNvsGet(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    const char* def = luaL_optstring(L, 2, "");
+    Preferences p;
+    p.begin("dnd-save", true);
+    String val = p.getString(key, def);
+    p.end();
+    lua_pushstring(L, val.c_str());
+    return 1;
+}
+
 static int luaOnionDisplayBeginBatch(lua_State*) {
     g_luaBatchMode = true;
     return 0;
@@ -2382,6 +2403,10 @@ static void registerOnionLua(lua_State* L) {
     lua_setfield(L, -2, "espnow_receive");
     lua_pushcfunction(L, luaOnionHttpPost);
     lua_setfield(L, -2, "http_post");
+    lua_pushcfunction(L, luaOnionNvsSet);
+    lua_setfield(L, -2, "nvs_set");
+    lua_pushcfunction(L, luaOnionNvsGet);
+    lua_setfield(L, -2, "nvs_get");
     lua_pushcfunction(L, luaOnionDisplayBeginBatch);
     lua_setfield(L, -2, "display_begin_batch");
     lua_pushcfunction(L, luaOnionDisplayEndBatch);
