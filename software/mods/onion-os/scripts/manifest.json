@@ -2,7 +2,7 @@
   "scripts": [
     {
       "name": "dnd-adventure.lua",
-      "url": "https://raw.githubusercontent.com/RecklessReef-ai/null-city-badge-main/feature/onion-os/software/mods/onion-os/scripts/dnd-adventure.lua",
+      "url": "https://raw.githubusercontent.com/OnionDAO-git/oniondao-badge/feature/onion-os/software/mods/onion-os/scripts/dnd-adventure.lua",
       "autorun": false
     }
   ]
