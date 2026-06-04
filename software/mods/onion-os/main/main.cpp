@@ -120,6 +120,7 @@ struct RuntimeConfig {
     String wifiPassword;
     String serverBaseUrl;
     String badgeApiKey;
+    String aiApiKey;
     String mqttUri;
     String mqttUsername;
     String mqttPassword;
@@ -253,6 +254,7 @@ static void loadConfig() {
     g_config.wifiPassword = ONION_HARDCODED_WIFI_PASSWORD;
     g_config.serverBaseUrl = ONION_HARDCODED_SERVER_BASE_URL;
     g_config.badgeApiKey = prefString("api_key", ONION_DEFAULT_BADGE_API_KEY);
+    g_config.aiApiKey = prefString("ai_key", "");
     g_config.mqttUri = ONION_HARDCODED_MQTT_URI;
     g_config.mqttUsername = ONION_HARDCODED_MQTT_USERNAME;
     g_config.mqttPassword = ONION_HARDCODED_MQTT_PASSWORD;
@@ -2263,6 +2265,57 @@ static int luaOnionEspNowReceive(lua_State* L) {
     return 1;
 }
 
+static int luaOnionHttpPost(lua_State* L) {
+    const char* url  = luaL_checkstring(L, 1);
+    const char* body = luaL_checkstring(L, 2);
+
+    if (!ensureWifi()) {
+        lua_newtable(L);
+        lua_pushinteger(L, -1);
+        lua_setfield(L, -2, "status");
+        lua_pushstring(L, "no wifi");
+        lua_setfield(L, -2, "body");
+        return 1;
+    }
+
+    String responseBuffer;
+    esp_http_client_config_t cfg = {};
+    cfg.url               = url;
+    cfg.timeout_ms        = 15000;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.event_handler     = httpCaptureEvent;
+    cfg.user_data         = &responseBuffer;
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) {
+        lua_newtable(L);
+        lua_pushinteger(L, -1);
+        lua_setfield(L, -2, "status");
+        lua_pushstring(L, "init failed");
+        lua_setfield(L, -2, "body");
+        return 1;
+    }
+
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    if (g_config.aiApiKey.length()) {
+        esp_http_client_set_header(client, "x-api-key", g_config.aiApiKey.c_str());
+        esp_http_client_set_header(client, "anthropic-version", "2023-06-01");
+    }
+    esp_http_client_set_post_field(client, body, strlen(body));
+
+    esp_err_t err = esp_http_client_perform(client);
+    int code = (err == ESP_OK) ? esp_http_client_get_status_code(client) : -1;
+    esp_http_client_cleanup(client);
+
+    lua_newtable(L);
+    lua_pushinteger(L, code);
+    lua_setfield(L, -2, "status");
+    lua_pushstring(L, responseBuffer.c_str());
+    lua_setfield(L, -2, "body");
+    return 1;
+}
+
 static void registerOnionLua(lua_State* L) {
     lua_newtable(L);
     lua_pushcfunction(L, luaOnionLog);
@@ -2313,6 +2366,8 @@ static void registerOnionLua(lua_State* L) {
     lua_setfield(L, -2, "espnow_send");
     lua_pushcfunction(L, luaOnionEspNowReceive);
     lua_setfield(L, -2, "espnow_receive");
+    lua_pushcfunction(L, luaOnionHttpPost);
+    lua_setfield(L, -2, "http_post");
     lua_setglobal(L, "onion");
 }
 
@@ -2601,6 +2656,10 @@ static void handleSerial() {
             g_config.badgeApiKey = args[1];
             saveConfigValue("api_key", g_config.badgeApiKey);
             setLog("API key saved");
+        } else if (args[0] == "ai-key" && args.size() >= 2) {
+            g_config.aiApiKey = args[1];
+            saveConfigValue("ai_key", g_config.aiApiKey);
+            setLog("AI key saved");
         } else if (args[0] == "mqtt" || args[0] == "mqtt-auth") {
             g_config.mqttUri = ONION_HARDCODED_MQTT_URI;
             size_t firstAuthArg = 1;
