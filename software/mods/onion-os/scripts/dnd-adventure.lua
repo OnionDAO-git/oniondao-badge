@@ -158,20 +158,23 @@ local function draw_scene(char, scene_text, choices, cursor, roll_info)
   onion.display_rect(1, 1, W-2, H-2, { fill=false, clear=false })
   onion.display_text(hdr(char), 4, 14, { font="small", clear=false })
   onion.display_line(2, 20, W-2, 20, { clear=false })
-  for i = 1, math.min(4, #lines) do
-    onion.display_text(lines[i], 4, 19 + i*15, { font="small", clear=false })
+  -- Story lines: 18px spacing gives 5px gap between 13px-tall characters
+  for i = 1, math.min(3, #lines) do
+    onion.display_text(lines[i], 4, 18 + i*18, { font="small", clear=false })
   end
-  if roll_info then
-    onion.display_text(roll_info, 4, 79, { font="small", clear=false })
+  -- 4th slot: roll info or 4th story line
+  local line4 = roll_info or lines[4]
+  if line4 then
+    onion.display_text(line4, 4, 90, { font="small", clear=false })
   end
-  onion.display_line(2, 88, W-2, 88, { clear=false })
+  onion.display_line(2, 100, W-2, 100, { clear=false })
   for i, ch in ipairs(choices) do
-    local y   = 88 + i * 15
+    local y   = 100 + i * 17
     local pre = (i == cursor) and "> " or "  "
     onion.display_text(pre .. i .. ". " .. ch:sub(1, 28), 4, y, { font="small", clear=false })
   end
-  onion.display_line(2, 141, W-2, 141, { clear=false })
-  onion.display_text("UP/DN  SEL choose  CAN exit", 4, 155, { font="small", clear=false })
+  onion.display_line(2, 153, W-2, 153, { clear=false })
+  onion.display_text("UP/DN  SEL choose  CAN exit", 4, 167, { font="small", clear=false })
   onion.display_end_batch()
 end
 
@@ -227,21 +230,29 @@ local function alignment_screen()
     onion.clear_display()
     onion.display_rect(1, 1, W-2, H-2, { fill=false, clear=false })
     onion.display_text("ALIGNMENT", 6, 16, { font="bold", clear=false })
-    onion.display_line(2, 22, W-2, 22, { clear=false })
+    onion.display_line(2, 23, W-2, 23, { clear=false })
+    -- 3x3 grid: each cell is 2 lines tall to fit long names (e.g. "Chaotic Neutral")
+    -- rows at y=48,88,128 (40px apart); cols at x=4,91,178 (87px apart)
     for i, al in ipairs(ALIGNMENTS) do
-      local col = (i-1) % 3
-      local row = math.floor((i-1) / 3)
-      local x, y = 4 + col*87, 44 + row*34
+      local col  = (i-1) % 3
+      local row  = math.floor((i-1) / 3)
+      local x    = 4  + col * 87
+      local y    = 48 + row * 40
+      -- split "Word1 Word2" into two lines
+      local w1, w2 = al:match("^(%S+)%s+(.+)$")
+      w1 = w1 or al; w2 = w2 or ""
       if i == idx then
-        onion.display_rect(x-2, y-12, 86, 18, { fill=true,  clear=false })
-        onion.display_text(al, x, y, { font="small", color="white", clear=false })
+        onion.display_rect(x-2, y-13, 86, 31, { fill=true,  clear=false })
+        onion.display_text(w1, x, y,    { font="small", color="white", clear=false })
+        onion.display_text(w2, x, y+14, { font="small", color="white", clear=false })
       else
-        onion.display_rect(x-2, y-12, 86, 18, { fill=false, clear=false })
-        onion.display_text(al, x, y, { font="small", clear=false })
+        onion.display_rect(x-2, y-13, 86, 31, { fill=false, clear=false })
+        onion.display_text(w1, x, y,    { font="small", clear=false })
+        onion.display_text(w2, x, y+14, { font="small", clear=false })
       end
     end
-    onion.display_line(2, 148, W-2, 148, { clear=false })
-    onion.display_text("L/R/U/D move   SEL confirm", 6, 163, { font="small", clear=false })
+    onion.display_line(2, 155, W-2, 155, { clear=false })
+    onion.display_text("L/R/U/D move   SEL confirm", 6, 170, { font="small", clear=false })
     onion.display_end_batch()
   end
   draw(); wait_release()
