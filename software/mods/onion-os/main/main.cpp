@@ -2403,11 +2403,13 @@ static bool runLuaSource(const String& source, const String& name) {
     if (status != LUA_OK) {
         String err = lua_tostring(L, -1);
         lua_close(L);
+        g_luaBatchMode = false;
         setLog("Lua error: " + clipped(err, 22));
         return false;
     }
 
     lua_close(L);
+    g_luaBatchMode = false;
     if (g_luaDisplayActive) {
         Serial.printf("[onion-os] Lua ran %s\n", name.c_str());
     } else {
@@ -2610,6 +2612,7 @@ static void syncScripts() {
     }
     cJSON_Delete(root);
     setLog("Synced S:" + String(count) + " I:" + String(imageCount));
+    refreshScriptList();
 }
 
 static void printHelp() {
