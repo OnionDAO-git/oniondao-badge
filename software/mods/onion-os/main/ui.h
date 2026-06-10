@@ -16,5 +16,6 @@ void drawWifiList();
 void drawWifiPassword();
 void drawWifiConnecting();
 void drawWifiResult();
+void drawAboutScreen();
 
 int kbRowLen(int row);

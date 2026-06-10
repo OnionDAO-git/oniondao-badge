@@ -274,3 +274,37 @@ void drawWifiResult() {
     }
     printString("SELECT or CANCEL to continue", 120);
 }
+
+void drawAboutScreen() {
+    g_frame.fillScreen(GxEPD_WHITE);
+    printLine("ABOUT", 22, &FreeMonoBold18pt7b);
+
+    int y = 48;
+    String displayName = g_identity.name.length() ? g_identity.name : g_identity.username;
+    printString("name: " + clipped(displayName, 22), y);
+    y += 18;
+
+    printString("handle: " + (g_identity.handle.length() ? clipped(g_identity.handle, 20) : "-"), y);
+    y += 18;
+
+    printString("DaysCheckedIn: " + String(g_identity.daysCheckedIn), y);
+    y += 18;
+
+    printString("EventsAttended: " + String(g_identity.eventCheckedInCount), y);
+    y += 18;
+
+    if (g_identity.statusUpdateBody.length()) {
+        String body = g_identity.statusUpdateBody;
+        const int maxFirst = 12;  // "LastStatus: " is 12 chars, ~24 chars fit on screen
+        if ((int)body.length() <= maxFirst) {
+            printString("LastStatus: " + body, y);
+        } else {
+            printString("LastStatus: " + body.substring(0, maxFirst), y);
+            y += 18;
+            String rest = body.substring(maxFirst);
+            printString("  " + clipped(rest, 22), y);  // "  " prefix = 2, leaving 22
+        }
+    } else {
+        printString("LastStatus: -", y);
+    }
+}

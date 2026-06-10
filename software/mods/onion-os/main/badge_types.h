@@ -145,6 +145,7 @@ enum Screen : uint8_t {
     SCREEN_WIFI_CONNECTING,
     SCREEN_WIFI_RESULT,
     SCREEN_DELETE_CONFIRM,
+    SCREEN_ABOUT,
 };
 
 enum ActiveModule : uint8_t {
@@ -190,6 +191,12 @@ struct BadgeIdentity {
     String onionCount = "0";
     String solanaPublicKey;
     bool linked = false;
+    String name;
+    String handle;
+    String bio;
+    int daysCheckedIn = 0;
+    int eventCheckedInCount = 0;
+    String statusUpdateBody;
 };
 
 struct LinkPrompt {

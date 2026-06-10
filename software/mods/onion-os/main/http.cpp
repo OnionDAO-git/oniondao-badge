@@ -437,3 +437,38 @@ void updateProfileFromJson(cJSON* root) {
     }
     if (changed) persistBadgeState();
 }
+
+static bool updateProfileExtendedFromObject(cJSON* obj) {
+    if (!cJSON_IsObject(obj)) return false;
+
+    String value;
+    if (jsonValueString(obj, "name", value).length() && value.length())
+        g_identity.name = value;
+    if (jsonValueString(obj, "handle", value).length() && value.length())
+        g_identity.handle = value;
+    if (jsonValueString(obj, "bio", value).length() && value.length())
+        g_identity.bio = value;
+
+    g_identity.daysCheckedIn = jsonInt(obj, "daysCheckedIn", g_identity.daysCheckedIn);
+    g_identity.eventCheckedInCount = jsonInt(obj, "eventCheckedInCount", g_identity.eventCheckedInCount);
+
+    cJSON* statusUpdates = cJSON_GetObjectItemCaseSensitive(obj, "statusUpdates");
+    if (cJSON_IsArray(statusUpdates) && cJSON_GetArraySize(statusUpdates) > 0) {
+        cJSON* first = cJSON_GetArrayItem(statusUpdates, 0);
+        if (cJSON_IsObject(first)) {
+            String body;
+            if (jsonValueString(first, "body", body).length())
+                g_identity.statusUpdateBody = body;
+        }
+    }
+
+    return true;
+}
+
+void updateProfileExtendedFromJson(cJSON* root) {
+    updateProfileExtendedFromObject(root);
+    const char* objectKeys[] = {"profile", "user", "account"};
+    for (const char* key : objectKeys) {
+        updateProfileExtendedFromObject(cJSON_GetObjectItemCaseSensitive(root, key));
+    }
+}

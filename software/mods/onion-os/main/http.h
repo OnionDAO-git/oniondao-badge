@@ -29,3 +29,4 @@ uint64_t jsonUint64(cJSON* obj, const char* key, uint64_t fallback);
 // Profile state
 void persistBadgeState();
 void updateProfileFromJson(cJSON* root);
+void updateProfileExtendedFromJson(cJSON* root);

@@ -717,6 +717,7 @@ bool refreshPublicProfile(bool quiet) {
     }
     String beforeCount = g_identity.onionCount;
     updateProfileFromJson(root);
+    updateProfileExtendedFromJson(root);
     String wallet = jsonString(root, "solanaWalletAddress");
     if (wallet.length() && wallet != g_identity.solanaPublicKey) {
         g_identity.solanaPublicKey = wallet;

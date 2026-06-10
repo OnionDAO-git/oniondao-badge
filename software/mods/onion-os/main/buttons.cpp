@@ -83,7 +83,13 @@ void handleButtons() {
             if (g_settingsSel == 0) {
                 g_wifiOverviewSel = 0;
                 g_screen = SCREEN_WIFI_OVERVIEW;
+            } else if (g_settingsSel == 1) {
+                g_screen = SCREEN_ABOUT;
             }
+        }
+    } else if (g_screen == SCREEN_ABOUT) {
+        if (pressed & BTN_CANCEL) {
+            g_screen = SCREEN_SETTINGS;
         }
     } else if (g_screen == SCREEN_WIFI_OVERVIEW) {
         if (pressed & BTN_CANCEL) {

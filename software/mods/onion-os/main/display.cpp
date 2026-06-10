@@ -252,6 +252,7 @@ void redraw() {
     else if (g_screen == SCREEN_WIFI_CONNECTING) drawWifiConnecting();
     else if (g_screen == SCREEN_WIFI_RESULT)     drawWifiResult();
     else if (g_screen == SCREEN_DELETE_CONFIRM)  drawDeleteConfirm();
+    else if (g_screen == SCREEN_ABOUT)           drawAboutScreen();
     else drawStatus();
     flushFrame();
     g_needsRedraw = false;
