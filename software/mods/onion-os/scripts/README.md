@@ -81,6 +81,28 @@ to a text-only ASCII-bar mode so the game logic still runs.
 `millis`). All additions are in `main/main.cpp` and documented in
 `docs/03-api-improvement.md`.
 
+## EPUB Reader
+
+[`epub-reader/`](epub-reader/) reads books on the e-paper panel. EPUBs are
+converted on a laptop with `epub-reader/epub2badge.py` (Python 3, stdlib only),
+which reflows the text for the panel and emits self-contained `.lua` book
+scripts plus a `manifest.json` to serve them from. Big books are split into
+parts that fit the 256 KB script cap.
+
+Controls:
+
+- `RIGHT` / `DOWN`: next page (hold to keep turning)
+- `LEFT` / `UP`: previous page (hold to keep turning)
+- `SELECT`: chapter menu
+- `CANCEL`: save bookmark and return to Onion OS
+
+Bookmarks persist in NVS. Page turns use two deferred-frame commits so they
+stay on the fast partial-refresh path. A ready-to-run sample is committed at
+`epub-reader/sample/raven.lua`. See [`epub-reader/README.md`](epub-reader/README.md).
+
+**Requires:** `display_begin`/`display_commit` and the Lua kv store (current
+`mods/onion-os` main).
+
 ## Image Browser
 
 `image-browser.lua` browses every downloaded image stored in SPIFFS as
