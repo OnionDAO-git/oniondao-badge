@@ -503,7 +503,12 @@ def load_txt(path: Path, title):
     else:
         text = raw.decode("utf-8", errors="replace")
     heading_re = re.compile(
-        r"^(CHAPTER|Chapter|BOOK|Book|PART|Part|CANTO|[IVXLCDM]+\.?)([\s.:].{0,40})?$")
+        r"^(CHAPTER|Chapter|BOOK|Book|PART|Part|CANTO|[IVXLCDM]+\.?)([\s.:].{0,40})?$"
+        # numbered sections in technical docs: "4.2 Timestamp for Events"
+        # (digit-free tail, so data/table rows don't register as chapters)
+        r"|^\d{1,2}(\.\d{1,2}){0,2}\.?\s+[A-Z][A-Za-z][A-Za-z ,'\-()/]{1,45}$"
+        r"|^(Abstract|Preface|Foreword|Introduction|References|Bibliography|"
+        r"Acknowledg\w*|Epilogue|Prologue|Appendix([\s.:].{0,40})?)$")
     blocks = []
     chapter_marks = {}
     for para in re.split(r"\n\s*\n", text):
