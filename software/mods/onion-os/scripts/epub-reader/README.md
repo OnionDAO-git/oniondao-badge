@@ -3,6 +3,10 @@
 Read books on the badge's e-paper panel. LEFT/RIGHT turn pages, SELECT opens
 a chapter menu, CANCEL bookmarks your spot and returns to Onion OS.
 
+**Module variant:** none — runs on a bare badge.
+**GPIOs touched:** none directly; it is a pure Onion OS Lua script using the
+firmware's display (J4 socket) and button (`PBINT`/TCA9534) APIs.
+
 The badge has no unzip or XML parser, so EPUBs are converted on your laptop
 first: [`epub2badge.py`](epub2badge.py) (Python 3, stdlib only) extracts the
 book text, reflows it for the panel, and emits ready-to-install Lua scripts —
