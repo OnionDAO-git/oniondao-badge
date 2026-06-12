@@ -318,10 +318,9 @@ fi
 
 if [[ "$SPIFFS_ONLY" -eq 0 ]]; then
   idf.py build
-  if [[ "$MONITOR" -eq 1 ]]; then
-    idf.py -p "$PORT" -b "$BAUD" flash monitor
-  else
-    idf.py -p "$PORT" -b "$BAUD" flash
+  idf.py -p "$PORT" -b "$BAUD" flash
+  if [[ "$MONITOR" -eq 1 && "$FLASH_SPIFFS" -eq 0 ]]; then
+    idf.py -p "$PORT" -b 115200 monitor
   fi
 fi
 
@@ -329,6 +328,7 @@ if [[ "$FLASH_SPIFFS" -eq 1 ]]; then
   build_spiffs_image
   flash_spiffs_image
   if [[ "$MONITOR" -eq 1 ]]; then
-    idf.py -p "$PORT" -b "$BAUD" monitor
+    echo "baud 115200"
+    idf.py -p "$PORT" -b 115200 monitor
   fi
 fi
