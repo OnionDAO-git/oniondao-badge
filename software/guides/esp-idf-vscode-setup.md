@@ -58,7 +58,7 @@ not install it separately.
 >
 > **macOS (Homebrew):**
 > ```bash
-> brew install libgcrypt glib pixman sdl2 libslirp
+>brew install libgcrypt glib pixman sdl2 libslirp dfu-util cmake python
 > ```
 >
 > **Linux (Debian/Ubuntu):**
