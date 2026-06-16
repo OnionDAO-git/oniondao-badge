@@ -1,0 +1,9 @@
+{
+  "scripts": [
+    {
+      "name": "raven.lua",
+      "url": "http://BADGE-HOST:8000/raven.lua",
+      "autorun": false
+    }
+  ]
+}
