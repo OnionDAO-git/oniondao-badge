@@ -81,6 +81,22 @@ to a text-only ASCII-bar mode so the game logic still runs.
 `millis`). All additions are in `main/main.cpp` and documented in
 `docs/03-api-improvement.md`.
 
+## Onion Bookshelf
+
+`onion-bookshelf/` is a plain-text book reader: a main menu (Library / About /
+Help), a multi-book library, and paged reading with per-book bookmarks, all in
+one Lua script. Books are authored as `.txt` files and folded into an
+installable `onion-bookshelf.lua` by `build.py` (no EPUB, no firmware build). A
+curated onion-themed shelf ships by default. See
+[`onion-bookshelf/README.md`](onion-bookshelf/README.md).
+
+Controls:
+
+- `UP` / `DOWN`: move in the menu / library
+- `SELECT`: open
+- `LEFT` / `RIGHT`: turn pages while reading
+- `CANCEL`: step back (and exit from the menu)
+
 ## Image Browser
 
 `image-browser.lua` browses every downloaded image stored in SPIFFS as

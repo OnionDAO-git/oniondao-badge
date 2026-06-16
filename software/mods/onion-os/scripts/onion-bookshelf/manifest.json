@@ -1,0 +1,9 @@
+{
+  "scripts": [
+    {
+      "name": "onion-bookshelf.lua",
+      "url": "http://BADGE-HOST:8000/onion-bookshelf.lua",
+      "autorun": false
+    }
+  ]
+}
