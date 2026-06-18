@@ -10,6 +10,10 @@ Designed in **KiCad 9.0.3**. The hardware (schematics, PCB, BOM, fabrication
 outputs, STEP model) lives in [`pcb/`](pcb). The software lives in
 [`software/`](software) and is community-driven — PRs welcome.
 
+> **🧅 Just got a badge?** New attendees start with the
+> **[Badge Quickstart](docs/BADGE-QUICKSTART.md)** — power it on, confirm Onion
+> OS is running, and link it to your profile in ~5 minutes.
+
 ![Top](pcb/oniondao-badge_top.png)
 ![Bottom](pcb/oniondao-badge_btm.png)
 
