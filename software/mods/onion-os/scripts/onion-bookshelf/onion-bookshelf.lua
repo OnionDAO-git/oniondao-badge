@@ -13,10 +13,30 @@
 --
 -- Your place in each book is saved (onion.kv_set), so you resume where you
 -- left off — even after a reboot.
+--
+-- Version 0.3 (shown on the About screen).
+--
+-- ROADMAP (next steps)
+--   * one more onion book, toward five.
+--   * borrow from epub-reader (#5): hold-to-repeat paging, a progress %, and
+--     the two-commit partial-refresh that dodges ghosting.
+--   * more on-ramps for text: this .txt path, an EPUB importer (#5's
+--     converter), maybe IPFS for sharing/pinning shelves badge-to-badge.
+--   * maybe a shared reader core with pluggable sources (combine with #5).
+--
+-- NOTES FROM epub-reader (#5), per quindelin's handoff:
+--   * pre-bake pages at build time -> chapter jumps are O(1), no on-device
+--     repagination (a 4,700-page jump costs one page turn).
+--   * SPIFFS is the real budget: big multi-part books (~170 KB/part) can fill
+--     the ~1.5 MB partition (he froze a badge mid-sync). Watch free space.
+--   * two partials per turn reads smooth; the every-30 full refresh is a
+--     deliberate "clean blink," not a glitch.
+--   * ASCII-only font: technical PDFs lose tables/equations; non-Latin -> "?".
 
 ----------------------------------------------------------------------
--- 1. THE LIBRARY  (generated from books/*.txt — see tools/build-books.py)
+-- 1. THE LIBRARY  (generated from books/*.txt — see build.py)
 ----------------------------------------------------------------------
+local VERSION = "0.3"   -- bump as you iterate; shown on the About screen
 local books = {
   {
     title = "An Onion",
@@ -251,7 +271,7 @@ end
 local MENU_ITEMS = { "Library", "About", "Help" }
 
 local ABOUT_LINES = {
-  "Onion Bookshelf",
+  "Onion Bookshelf  v" .. VERSION,
   "",
   "A small reader for",
   "plain-text books on",
