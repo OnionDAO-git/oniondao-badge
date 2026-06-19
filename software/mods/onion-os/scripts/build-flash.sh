@@ -2,10 +2,13 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$PROJECT_DIR/scripts"
 TARGET="esp32s3"
 BAUD="${BAUD:-460800}"
 PORT="${PORT:-}"
 MONITOR=0
+FLASH_SPIFFS=0
+SPIFFS_ONLY=0
 ONION_SHARED_SECRET="${ONION_SHARED_SECRET:-02eb3d5e04fd2dc9cbb6f3f5c6c9d89d9c96acd987cc24ddf9f717f9480e8786}"
 ONION_WIFI_SSID="${ONION_WIFI_SSID:-CIC Guest}"
 ONION_WIFI_PASSWORD="${ONION_WIFI_PASSWORD:-1nnovation}"
@@ -28,6 +31,8 @@ such as the wrapped Solana wallet seed.
 Options:
   -p, --port PORT    Flash a specific serial port instead of auto-detecting
   -b, --baud BAUD    Flash baud rate (default: 460800, or $BAUD)
+  --spiffs           Also build and flash the SPIFFS partition with scripts/*.lua
+  --spiffs-only      Flash only the SPIFFS partition (skip app build/flash)
   --monitor          Open idf.py monitor after flashing
   -h, --help         Show this help
 
@@ -58,6 +63,15 @@ while [[ $# -gt 0 ]]; do
       echo "Refusing to erase flash: Onion OS stores the wrapped Solana wallet seed in NVS." >&2
       echo "Use idf.py erase-flash manually only when you intentionally want to delete badge state." >&2
       exit 2
+      ;;
+    --spiffs)
+      FLASH_SPIFFS=1
+      shift
+      ;;
+    --spiffs-only)
+      FLASH_SPIFFS=1
+      SPIFFS_ONLY=1
+      shift
       ;;
     --monitor)
       MONITOR=1
@@ -128,6 +142,21 @@ esptool_command() {
   fi
 }
 
+# esptool v5+ uses hyphenated subcommands (write-flash, chip-id), older
+# versions use underscores (write_flash, chip_id).  Detect once so every
+# call site can use the right form.
+detect_esptool_subcmd_style() {
+  local help
+  help="$("$ESPTOOL" --help 2>&1 || true)"
+  if echo "$help" | grep -q 'chip-id'; then
+    ESP_CHIP_ID="chip-id"
+    ESP_WRITE_FLASH="write-flash"
+  else
+    ESP_CHIP_ID="chip_id"
+    ESP_WRITE_FLASH="write_flash"
+  fi
+}
+
 c_string() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -179,7 +208,7 @@ probe_esp32s3_port() {
   local port="$1"
   local output
 
-  if ! output="$("$ESPTOOL" --chip auto --port "$port" chip_id 2>&1)"; then
+  if ! output="$("$ESPTOOL" --chip auto --port "$port" "$ESP_CHIP_ID" 2>&1)"; then
     return 1
   fi
 
@@ -207,6 +236,7 @@ if [[ -z "$ESPTOOL" ]]; then
   echo "Install ESP-IDF or pass IDF_EXPORT=/path/to/esp-idf/export.sh" >&2
   exit 1
 fi
+detect_esptool_subcmd_style
 
 cd "$PROJECT_DIR"
 write_generated_config
@@ -231,14 +261,74 @@ fi
 
 echo "Using ESP32-S3 on $PORT"
 
+# --- SPIFFS helpers -----------------------------------------------------------
+
+# spiffs offset and size value defined in partition.csv
+SPIFFS_PART_OFFSET=0x670000
+SPIFFS_PART_SIZE=0x180000   # 1.5 MB
+
+build_spiffs_image() {
+  local staging
+  staging="$(mktemp -d)"
+  trap 'rm -rf "$staging"' EXIT
+
+  # Copy .lua files from scripts/ into the staging dir with the /scripts_
+  # prefix the firmware expects (see lua_api.cpp runScriptByName).
+  local count=0
+  for f in "$SCRIPTS_DIR"/*.lua; do
+    [[ -f "$f" ]] || continue
+    cp "$f" "$staging/scripts_$(basename "$f")"
+    count=$((count + 1))
+  done
+
+  if [[ $count -eq 0 ]]; then
+    echo "No .lua files in $SCRIPTS_DIR" >&2
+    return 1
+  fi
+
+  echo "Building SPIFFS image from $count script(s)..."
+
+  # spiffsgen.py lives inside the ESP-IDF tree
+  local spiffsgen="$IDF_PATH/components/spiffs/spiffsgen.py"
+  if [[ ! -f "$spiffsgen" ]]; then
+    echo "Cannot find spiffsgen.py — set IDF_PATH or install ESP-IDF" >&2
+    return 1
+  fi
+
+  SPIFFS_BIN="$PROJECT_DIR/build/spiffs.bin"
+  python "$spiffsgen" "$SPIFFS_PART_SIZE" "$staging" "$SPIFFS_BIN"
+  echo "SPIFFS image: $SPIFFS_BIN"
+}
+
+flash_spiffs_image() {
+  if [[ ! -f "$SPIFFS_BIN" ]]; then
+    echo "SPIFFS image not found at $SPIFFS_BIN" >&2
+    return 1
+  fi
+  echo "Flashing SPIFFS at $SPIFFS_PART_OFFSET..."
+  "$ESPTOOL" -p "$PORT" -b "$BAUD" --chip esp32s3 \
+    "$ESP_WRITE_FLASH" "$SPIFFS_PART_OFFSET" "$SPIFFS_BIN"
+}
+
+# --- Build & flash ------------------------------------------------------------
+
 if [[ ! -f sdkconfig ]] || ! grep -q '^CONFIG_IDF_TARGET="esp32s3"$' sdkconfig; then
   idf.py set-target "$TARGET"
 fi
 
-idf.py build
-
-if [[ "$MONITOR" -eq 1 ]]; then
-  idf.py -p "$PORT" -b "$BAUD" flash monitor
-else
+if [[ "$SPIFFS_ONLY" -eq 0 ]]; then
+  idf.py build
   idf.py -p "$PORT" -b "$BAUD" flash
+  if [[ "$MONITOR" -eq 1 && "$FLASH_SPIFFS" -eq 0 ]]; then
+    idf.py -p "$PORT" -b 115200 monitor
+  fi
+fi
+
+if [[ "$FLASH_SPIFFS" -eq 1 ]]; then
+  build_spiffs_image
+  flash_spiffs_image
+  if [[ "$MONITOR" -eq 1 ]]; then
+    echo "baud 115200"
+    idf.py -p "$PORT" -b 115200 monitor
+  fi
 fi

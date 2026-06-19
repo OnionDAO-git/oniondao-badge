@@ -37,6 +37,24 @@ stop the monitor and close any child monitor process.
 Example Lua scripts in this directory are meant to be copied into the Onion OS
 script registry or served through the script manifest.
 
+To build and copy your script(s) to the ESP32-S3 badges run the build-flash.sh script with extra params:
+
+|  Flag	| What it does |
+| ----- | -------- |
+| --spiffs	| Builds app + builds SPIFFS image from scripts/*.lua + flashes both |
+| --spiffs-only	| Only builds and flashes the SPIFFS partition (skips app build) |
+
+```sh
+# Flash app + scripts together
+scripts/build-flash.sh --spiffs
+
+# Flash only scripts (fast iteration on Lua)
+scripts/build-flash.sh --spiffs-only
+
+# With all options
+scripts/build-flash.sh --spiffs --port /dev/ttyUSB0 --monitor
+```
+
 ## E-paper Demo
 
 `eink-demo.lua` exercises the Onion SDK e-paper helpers by drawing text, a
