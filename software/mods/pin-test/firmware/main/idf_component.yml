@@ -1,0 +1,5 @@
+## arduino-esp32 pulled from the ESP Component Registry by the component manager.
+## v3.3.8 is built against ESP-IDF v5.5.4 — keep these in lockstep.
+dependencies:
+  espressif/arduino-esp32:
+    version: "3.3.8"
